@@ -1,0 +1,14 @@
+### Create a new investigation
+POST http://localhost:8080/api/investigations
+Content-Type: application/json
+
+{ "question": "Why are orders stuck in Payment Processing?" }
+
+### List recent investigations
+GET http://localhost:8080/api/investigations
+
+### Get one investigation with its evidence
+GET http://localhost:8080/api/investigations/1
+
+### Evidence only
+GET http://localhost:8080/api/investigations/1/evidence
