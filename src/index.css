@@ -1,0 +1,11 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+.app-content {
+    background-color: #e5e7eb;
+    min-height: 100vh;
+    padding: 40px 50px 40px 50px;
+}
