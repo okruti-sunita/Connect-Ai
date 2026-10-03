@@ -1,0 +1,19 @@
+# OPTIONAL - not used while the app runs on H2.
+# A local PostgreSQL for when you switch (see application.yml).
+# Start: docker compose up -d      Stop: docker compose down
+# The image is PostgreSQL with the pgvector extension pre-installed (needed in Phase 3).
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: connectai-postgres
+    environment:
+      POSTGRES_DB: connectai
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - connectai-pgdata:/var/lib/postgresql/data
+
+volumes:
+  connectai-pgdata:
