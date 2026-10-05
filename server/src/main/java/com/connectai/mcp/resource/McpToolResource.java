@@ -2,6 +2,8 @@ package com.connectai.mcp.resource;
 
 import com.connectai.mcp.api.dto.RegisterMcpServerRequest;
 import com.connectai.mcp.model.McpServer;
+import com.connectai.mcp.client.McpConnectionService;
+import com.connectai.mcp.api.dto.McpConnectionResponse;
 import com.connectai.mcp.operation.McpToolOperations;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
@@ -21,6 +23,7 @@ import java.util.UUID;
 public class McpToolResource {
 
     private final McpToolOperations mcpToolOperations;
+    private final McpConnectionService mcpConnectionService;
 
     @PostMapping
     public ResponseEntity<McpServer> registerTool(
@@ -36,6 +39,27 @@ public class McpToolResource {
     @GetMapping
     public ResponseEntity<List<McpServer>> getTools() {
         return ResponseEntity.ok(mcpToolOperations.getTools());
+    }
+
+    @PostMapping("/{id}/connect")
+    public ResponseEntity<McpConnectionResponse> connect(
+            @PathVariable UUID id) {
+
+        return ResponseEntity.ok(mcpConnectionService.connect(id));
+    }
+
+    @PostMapping("/{id}/disconnect")
+    public ResponseEntity<McpConnectionResponse> disconnect(
+            @PathVariable UUID id) {
+
+        return ResponseEntity.ok(mcpConnectionService.disconnect(id));
+    }
+
+    @GetMapping("/{id}/connection")
+    public ResponseEntity<McpConnectionResponse> connectionStatus(
+            @PathVariable UUID id) {
+
+        return ResponseEntity.ok(mcpConnectionService.status(id));
     }
 
     @GetMapping("/{id}")

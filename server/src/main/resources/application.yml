@@ -24,6 +24,9 @@ server:
 connectai:
   security:
     encryption-key: ${CONNECTAI_ENCRYPTION_KEY:local-dev-only-change-me}
+  mcp:
+    request-timeout-seconds: ${CONNECTAI_MCP_REQUEST_TIMEOUT_SECONDS:20}
+    connect-timeout-seconds: ${CONNECTAI_MCP_CONNECT_TIMEOUT_SECONDS:10}
   seed-demo-data: true
   tools:
     mode: fake

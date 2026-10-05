@@ -72,7 +72,7 @@ public class EMcpServer extends AbstractUUIDPersistable {
         this.authType = authType;
         this.encryptedSecret = encryptedSecret;
         this.enabled = enabled;
-        this.status = McpConnectionStatus.DISCONNECTED;
+        this.status = McpConnectionStatus.REGISTERED;
     }
 
     public void markConnecting() {
