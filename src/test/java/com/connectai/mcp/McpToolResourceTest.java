@@ -56,7 +56,6 @@ class McpToolResourceTest {
                                 }
                                 """.formatted(token)))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.id").isNumber())
                 .andExpect(jsonPath("$.name").value("GitHub"))
                 .andExpect(jsonPath("$.transport").value("STREAMABLE_HTTP"))
                 .andExpect(jsonPath("$.authType").value("BEARER"))

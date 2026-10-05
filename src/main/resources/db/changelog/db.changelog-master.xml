@@ -1,0 +1,228 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="
+            http://www.liquibase.org/xml/ns/dbchangelog
+            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- Database-specific properties -->
+
+    <property name="id.type"
+              value="uuid"
+              dbms="postgresql"/>
+
+    <property name="id.type"
+              value="uuid"
+              dbms="h2"/>
+
+    <property name="uuid.function"
+              value="gen_random_uuid()"
+              dbms="postgresql"/>
+
+    <property name="uuid.function"
+              value="random_uuid()"
+              dbms="h2"/>
+
+    <property name="date.timestamp.type"
+              value="timestamptz"
+              dbms="postgresql"/>
+
+    <property name="date.timestamp.type"
+              value="timestamp"
+              dbms="h2"/>
+
+
+    <!-- ========================================================= -->
+    <!-- INVESTIGATION                                             -->
+    <!-- ========================================================= -->
+
+    <changeSet id="001-create-investigation" author="connect-ai">
+
+        <createTable tableName="investigation">
+
+            <column name="id"
+                    type="${id.type}"
+                    defaultValueComputed="${uuid.function}">
+
+                <constraints
+                        nullable="false"
+                        primaryKey="true"
+                        primaryKeyName="pk_investigation"/>
+            </column>
+
+            <column name="question"
+                    type="varchar(2000)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="status"
+                    type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="resolved_answer"
+                    type="varchar(8000)"/>
+
+            <column name="created_at"
+                    type="${date.timestamp.type}">
+                <constraints nullable="false"/>
+            </column>
+
+        </createTable>
+
+    </changeSet>
+
+
+    <!-- ========================================================= -->
+    <!-- EVIDENCE ITEM                                             -->
+    <!-- ========================================================= -->
+
+    <changeSet id="002-create-evidence-item" author="connect-ai">
+
+        <createTable tableName="evidence_item">
+
+            <column name="id"
+                    type="${id.type}"
+                    defaultValueComputed="${uuid.function}">
+
+                <constraints
+                        nullable="false"
+                        primaryKey="true"
+                        primaryKeyName="pk_evidence_item"/>
+            </column>
+
+            <column name="investigation_id"
+                    type="${id.type}">
+
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="source_type"
+                    type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="source_ref"
+                    type="varchar(300)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="summary"
+                    type="varchar(4000)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="confidence_score"
+                    type="double"/>
+
+            <column name="fetched_at"
+                    type="${date.timestamp.type}">
+                <constraints nullable="false"/>
+            </column>
+
+        </createTable>
+
+
+        <addForeignKeyConstraint
+                baseTableName="evidence_item"
+                baseColumnNames="investigation_id"
+                referencedTableName="investigation"
+                referencedColumnNames="id"
+                constraintName="fk_evidence_investigation"
+                onDelete="CASCADE"/>
+
+
+        <createIndex
+                tableName="evidence_item"
+                indexName="idx_evidence_investigation">
+
+            <column name="investigation_id"/>
+
+        </createIndex>
+
+    </changeSet>
+
+
+    <!-- ========================================================= -->
+    <!-- MCP SERVER                                                -->
+    <!-- ========================================================= -->
+
+    <changeSet id="003-create-mcp-server" author="connect-ai">
+
+        <createTable tableName="mcp_server">
+
+            <column name="id"
+                    type="${id.type}"
+                    defaultValueComputed="${uuid.function}">
+
+                <constraints
+                        nullable="false"
+                        primaryKey="true"
+                        primaryKeyName="pk_mcp_server"/>
+            </column>
+
+            <column name="name"
+                    type="varchar(100)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="transport"
+                    type="varchar(30)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="endpoint"
+                    type="varchar(500)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="auth_type"
+                    type="varchar(30)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="encrypted_secret"
+                    type="varchar(2000)"/>
+
+            <column name="enabled"
+                    type="boolean">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="status"
+                    type="varchar(30)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="last_error"
+                    type="varchar(2000)"/>
+
+            <column name="last_connected_at"
+                    type="${date.timestamp.type}"/>
+
+            <column name="created_at"
+                    type="${date.timestamp.type}">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="updated_at"
+                    type="${date.timestamp.type}">
+                <constraints nullable="false"/>
+            </column>
+
+        </createTable>
+
+
+        <createIndex
+                tableName="mcp_server"
+                indexName="idx_mcp_server_name">
+
+            <column name="name"/>
+
+        </createIndex>
+
+    </changeSet>
+
+</databaseChangeLog>

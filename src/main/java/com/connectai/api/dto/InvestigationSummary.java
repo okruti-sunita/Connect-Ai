@@ -4,9 +4,10 @@ import com.connectai.domain.Investigation;
 import com.connectai.domain.InvestigationStatus;
 
 import java.time.Instant;
+import java.util.UUID;
 
 public record InvestigationSummary(
-        Long id,
+        UUID id,
         String question,
         InvestigationStatus status,
         Instant createdAt,

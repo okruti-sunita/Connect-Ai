@@ -15,6 +15,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class InvestigationService {
@@ -48,7 +49,7 @@ public class InvestigationService {
     }
 
     @Transactional(readOnly = true)
-    public InvestigationResponse get(Long id) {
+    public InvestigationResponse get(UUID id) {
         return InvestigationResponse.from(find(id));
     }
 
@@ -60,14 +61,14 @@ public class InvestigationService {
     }
 
     @Transactional(readOnly = true)
-    public List<EvidenceResponse> getEvidence(Long id) {
+    public List<EvidenceResponse> getEvidence(UUID id) {
         return find(id).getEvidenceItems().stream()
                 .map(EvidenceResponse::from)
                 .toList();
     }
 
-    private Investigation find(Long id) {
-        return investigations.findById(id)
+    private Investigation find(UUID id) {
+        return (Investigation) investigations.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "Investigation " + id + " not found"));
     }

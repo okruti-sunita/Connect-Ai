@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -73,7 +74,7 @@ public class McpToolService implements McpToolOperations {
 
     @Override
     @Transactional(readOnly = true)
-    public McpServer getTool(Long id) {
+    public McpServer getTool(UUID id) {
         return repository.findById(id)
                 .map(McpServer::from)
                 .orElseThrow(() -> new ResponseStatusException(

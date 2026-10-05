@@ -12,6 +12,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.UUID;
 
 @Validated
 @RestController
@@ -39,8 +40,8 @@ public class McpToolResource {
 
     @GetMapping("/{id}")
     public ResponseEntity<McpServer> getTool(
-            @PathVariable @Positive(message = "id must be positive") Long id) {
+            @PathVariable @Positive(message = "id must be positive") String id) {
 
-        return ResponseEntity.ok(mcpToolOperations.getTool(id));
+        return ResponseEntity.ok(mcpToolOperations.getTool(UUID.fromString(id)));
     }
 }

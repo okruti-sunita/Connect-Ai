@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
 import java.util.List;
+import java.util.UUID;
 
 /** Thin HTTP layer: translates requests into service calls, nothing more. */
 @RestController
@@ -40,12 +41,12 @@ public class InvestigationController {
     }
 
     @GetMapping("/{id}")
-    public InvestigationResponse get(@PathVariable Long id) {
-        return service.get(id);
+    public InvestigationResponse get(@PathVariable String id) {
+        return service.get(UUID.fromString(id));
     }
 
     @GetMapping("/{id}/evidence")
-    public List<EvidenceResponse> evidence(@PathVariable Long id) {
-        return service.getEvidence(id);
+    public List<EvidenceResponse> evidence(@PathVariable String id) {
+        return service.getEvidence(UUID.fromString(id));
     }
 }

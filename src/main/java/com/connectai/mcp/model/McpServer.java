@@ -3,9 +3,10 @@ package com.connectai.mcp.model;
 import com.connectai.mcp.entity.EMcpServer;
 
 import java.time.OffsetDateTime;
+import java.util.UUID;
 
 public record McpServer(
-        Long id,
+        UUID id,
         String name,
         McpTransportType transport,
         String endpoint,
@@ -29,8 +30,8 @@ public record McpServer(
                 entity.getStatus(),
                 entity.getLastError(),
                 entity.getLastConnectedAt(),
-                entity.getCreatedAt(),
-                entity.getUpdatedAt()
+                entity.getUpdatedAt(),
+                entity.getCreatedAt()
         );
     }
 }

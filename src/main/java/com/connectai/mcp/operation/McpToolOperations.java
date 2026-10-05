@@ -4,6 +4,7 @@ import com.connectai.mcp.api.dto.RegisterMcpServerRequest;
 import com.connectai.mcp.model.McpServer;
 
 import java.util.List;
+import java.util.UUID;
 
 public interface McpToolOperations {
 
@@ -11,5 +12,5 @@ public interface McpToolOperations {
 
     List<McpServer> getTools();
 
-    McpServer getTool(Long id);
+    McpServer getTool(UUID id);
 }

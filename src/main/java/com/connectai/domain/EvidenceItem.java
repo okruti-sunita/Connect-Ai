@@ -1,15 +1,14 @@
 package com.connectai.domain;
 
+import com.connectai.jpa.base.AbstractUUIDPersistable;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
+import lombok.Getter;
 
 import java.time.Instant;
 
@@ -18,14 +17,11 @@ import java.time.Instant;
  * sourceRef is the traceability anchor, e.g. "PR #456" or "JIRA-123".
  */
 @Entity
-public class EvidenceItem {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+@Getter
+public class EvidenceItem extends AbstractUUIDPersistable {
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "investigation_id")
+    @JoinColumn(name = "investigation_id", nullable = false)
     private Investigation investigation;
 
     @Enumerated(EnumType.STRING)
@@ -47,7 +43,12 @@ public class EvidenceItem {
         // required by JPA
     }
 
-    public EvidenceItem(SourceType sourceType, String sourceRef, String summary, Double confidenceScore) {
+    public EvidenceItem(
+            SourceType sourceType,
+            String sourceRef,
+            String summary,
+            Double confidenceScore
+    ) {
         this.sourceType = sourceType;
         this.sourceRef = sourceRef;
         this.summary = summary;
@@ -58,12 +59,4 @@ public class EvidenceItem {
     void setInvestigation(Investigation investigation) {
         this.investigation = investigation;
     }
-
-    public Long getId() { return id; }
-    public Investigation getInvestigation() { return investigation; }
-    public SourceType getSourceType() { return sourceType; }
-    public String getSourceRef() { return sourceRef; }
-    public String getSummary() { return summary; }
-    public Double getConfidenceScore() { return confidenceScore; }
-    public Instant getFetchedAt() { return fetchedAt; }
 }

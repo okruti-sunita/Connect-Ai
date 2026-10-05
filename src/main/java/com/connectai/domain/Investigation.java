@@ -1,27 +1,25 @@
 package com.connectai.domain;
 
+import com.connectai.jpa.base.AbstractUUIDPersistable;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
+import lombok.Getter;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
-/** One developer question / incident being investigated. */
+/**
+ * One developer question / incident being investigated.
+ */
 @Entity
-public class Investigation {
-
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+@Getter
+public class Investigation extends AbstractUUIDPersistable {
 
     @Column(nullable = false, length = 2000)
     private String question;
@@ -36,7 +34,11 @@ public class Investigation {
     @Column(nullable = false)
     private Instant createdAt;
 
-    @OneToMany(mappedBy = "investigation", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OneToMany(
+            mappedBy = "investigation",
+            cascade = CascadeType.ALL,
+            orphanRemoval = true
+    )
     @OrderBy("id ASC")
     private List<EvidenceItem> evidenceItems = new ArrayList<>();
 
@@ -64,11 +66,4 @@ public class Investigation {
         this.resolvedAnswer = reason;
         this.status = InvestigationStatus.FAILED;
     }
-
-    public Long getId() { return id; }
-    public String getQuestion() { return question; }
-    public InvestigationStatus getStatus() { return status; }
-    public String getResolvedAnswer() { return resolvedAnswer; }
-    public Instant getCreatedAt() { return createdAt; }
-    public List<EvidenceItem> getEvidenceItems() { return evidenceItems; }
 }
