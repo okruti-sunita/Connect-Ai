@@ -7,9 +7,9 @@ services:
     image: pgvector/pgvector:pg16
     container_name: connectai-postgres
     environment:
-      POSTGRES_DB: connectai
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: connect
+      POSTGRES_USER: connect
+      POSTGRES_PASSWORD: connect
     ports:
       - "5432:5432"
     volumes:

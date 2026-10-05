@@ -1,36 +1,20 @@
 spring:
   application:
     name: connect-ai
-  # ---- Database: H2 in-memory (default, needs nothing installed) ----
+
   datasource:
-    url: jdbc:h2:mem:connectai;DB_CLOSE_DELAY=-1
-    username: sa
-    password: ""
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/connect}
+    username: connect
+    password: connect
+    driver-class-name: org.postgresql.Driver
+
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: validate
     open-in-view: false
-  h2:
-    console:
-      enabled: true
-      path: /h2-console
 
-# ---- Database: PostgreSQL (switch later) ----
-# 1. pom.xml: uncomment the org.postgresql dependency, reload Maven.
-# 2. Start a database:  docker compose up -d   (uses docker-compose.yml, includes pgvector for Phase 3)
-# 3. In the spring: block above, delete/comment the H2 datasource + h2 sections
-#    and use these instead:
-#
-# spring:
-#   datasource:
-#     url: jdbc:postgresql://localhost:5432/connectai
-#     username: postgres
-#     password: postgres
-#     driver-class-name: org.postgresql.Driver
-#   jpa:
-#     hibernate:
-#       ddl-auto: update
-#     open-in-view: false
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
 
 server:
   port: 8080
@@ -38,20 +22,15 @@ server:
     include-message: always
 
 connectai:
-  # Inserts one demo investigation on startup so the API has something to show.
+  security:
+    encryption-key: ${CONNECTAI_ENCRYPTION_KEY:local-dev-only-change-me}
   seed-demo-data: true
   tools:
-    # fake = canned evidence for three demo scenarios (Step 2).
-    # Later steps add "mcp" = real GitHub / Jira / Splunk / Slack tools.
     mode: fake
   llm:
-    # false = Step 2 behaviour (rules + template, no network calls, no cost).
-    # true  = Claude picks the next tool and writes the answer. Needs ANTHROPIC_API_KEY.
-    # Tip: set it without editing this file via the environment variable CONNECTAI_LLM_ENABLED=true
     enabled: false
     api-key: ${ANTHROPIC_API_KEY:}
     base-url: https://api.anthropic.com
-    # Small and cheap is plenty for planning. Try a larger model for better answers.
     model: claude-haiku-4-5-20251001
     max-tokens: 1024
     timeout-seconds: 30

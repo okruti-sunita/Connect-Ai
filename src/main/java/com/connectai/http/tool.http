@@ -1,0 +1,20 @@
+### Register GitHub MCP
+POST http://localhost:8080/connect-ai/api/tools
+Content-Type: application/json
+
+{
+  "name": "GitHub",
+  "transport": "STREAMABLE_HTTP",
+  "endpoint": "https://api.githubcopilot.com/mcp/",
+  "authType": "BEARER",
+  "secret": "YOUR_GITHUB_TOKEN",
+  "enabled": true
+}
+
+
+### Get all MCP tools
+GET http://localhost:8080/connect-ai/api/tools
+
+
+### Get GitHub MCP tool
+GET http://localhost:8080/connect-ai/api/tools/1
