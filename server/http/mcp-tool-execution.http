@@ -1,0 +1,15 @@
+### Execute a discovered MCP tool
+# Replace the UUID with the id returned by POST /connect-ai/api/tools
+POST http://localhost:8080/connect-ai/api/tools/8c1a5f2e-3e4a-4f8b-9c10-2b5a6d7e8f90/tools/create_issue/execute
+Content-Type: application/json
+
+{
+  "arguments": {
+    "title": "Payment failure",
+    "description": "Investigate payment failure after release 2.4.1"
+  }
+}
+
+### Execute a tool with no arguments
+# The request body can be omitted when the MCP tool accepts no arguments.
+POST http://localhost:8080/connect-ai/api/tools/8c1a5f2e-3e4a-4f8b-9c10-2b5a6d7e8f90/tools/health_check/execute
