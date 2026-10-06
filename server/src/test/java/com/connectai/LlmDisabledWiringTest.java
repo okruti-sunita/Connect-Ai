@@ -4,6 +4,8 @@ import com.connectai.agent.AnswerGenerator;
 import com.connectai.agent.Planner;
 import com.connectai.agent.RuleBasedPlanner;
 import com.connectai.agent.TemplateAnswerGenerator;
+import com.connectai.agent.ToolExecutionPort;
+import com.connectai.mcp.client.McpToolExecutionAdapter;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -20,9 +22,13 @@ class LlmDisabledWiringTest {
     @Autowired
     private AnswerGenerator answers;
 
+    @Autowired
+    private ToolExecutionPort toolExecutionPort;
+
     @Test
     void usesTheStep2RulesAndTemplate() {
         assertThat(planner).isInstanceOf(RuleBasedPlanner.class);
         assertThat(answers).isInstanceOf(TemplateAnswerGenerator.class);
+        assertThat(toolExecutionPort).isInstanceOf(McpToolExecutionAdapter.class);
     }
 }

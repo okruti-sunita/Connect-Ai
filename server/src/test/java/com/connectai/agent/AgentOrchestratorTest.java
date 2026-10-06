@@ -19,7 +19,7 @@ class AgentOrchestratorTest {
     private final ScenarioCatalog catalog = new ScenarioCatalog();
 
     private AgentOrchestrator agent(List<EvidenceTool> tools, Planner planner) {
-        return new AgentOrchestrator(new ToolRegistry(tools), planner, new EvidenceRanker(), new TemplateAnswerGenerator());
+        return new AgentOrchestrator(new ToolRegistry(tools), planner, new EvidenceRanker(), new TemplateAnswerGenerator(), request -> new ToolExecutionResult(request.toolName(), false, List.of(), null));
     }
 
     private AgentOrchestrator defaultAgent() {

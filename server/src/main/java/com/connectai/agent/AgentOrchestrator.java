@@ -28,12 +28,29 @@ public class AgentOrchestrator {
     private final Planner planner;
     private final EvidenceRanker ranker;
     private final AnswerGenerator answers;
+    private final ToolExecutionPort toolExecutionPort;
 
-    public AgentOrchestrator(ToolRegistry tools, Planner planner, EvidenceRanker ranker, AnswerGenerator answers) {
+    public AgentOrchestrator(
+            ToolRegistry tools,
+            Planner planner,
+            EvidenceRanker ranker,
+            AnswerGenerator answers,
+            ToolExecutionPort toolExecutionPort) {
         this.tools = tools;
         this.planner = planner;
         this.ranker = ranker;
         this.answers = answers;
+        this.toolExecutionPort = toolExecutionPort;
+    }
+
+    /**
+     * Executes an externally provided tool through the application boundary.
+     *
+     * Task 5 intentionally does not let the planner choose arbitrary MCP tools
+     * yet. That decision belongs to the next agent-planning task.
+     */
+    public ToolExecutionResult executeTool(ToolExecutionRequest request) {
+        return toolExecutionPort.execute(request);
     }
 
     public AgentResult investigate(String question) {
