@@ -23,10 +23,10 @@ const DashboardView = () => {
     ];
 
     return (
-        <div className="dashboard-container">
+        <div className="container">
 
-            <div className="dashboard-header">
-                <h1 className="greetings">
+            <div className="header">
+                <h1 className="title">
                     {getCurrentGreeting()}
                 </h1>
 

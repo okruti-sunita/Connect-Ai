@@ -1,4 +1,4 @@
-.dashboard-container {
+.container {
   width: 100%;
   //max-width: 1390px;
   margin: 0 auto;
@@ -8,8 +8,8 @@
   min-height: 100vh;
   justify-content: space-between;
 
-  .dashboard-header {
-    .greetings {
+  .header {
+    .title {
       margin: 0 0 8px;
       color: #172b4d;
       font-size: 29px;
