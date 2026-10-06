@@ -1,6 +1,8 @@
 package com.connectai.mcp.resource;
 
+import com.connectai.mcp.api.dto.McpToolDiscoveryResponse;
 import com.connectai.mcp.api.dto.RegisterMcpServerRequest;
+import com.connectai.mcp.client.McpToolDiscoveryService;
 import com.connectai.mcp.model.McpServer;
 import com.connectai.mcp.client.McpConnectionService;
 import com.connectai.mcp.api.dto.McpConnectionResponse;
@@ -24,6 +26,7 @@ public class McpToolResource {
 
     private final McpToolOperations mcpToolOperations;
     private final McpConnectionService mcpConnectionService;
+    private final McpToolDiscoveryService mcpToolDiscoveryService;
 
     @PostMapping
     public ResponseEntity<McpServer> registerTool(
@@ -55,6 +58,11 @@ public class McpToolResource {
         return ResponseEntity.ok(mcpConnectionService.disconnect(id));
     }
 
+    @GetMapping("/{id}/tools")
+    public ResponseEntity<McpToolDiscoveryResponse> discoverTools(@PathVariable UUID id) {
+        return ResponseEntity.ok(mcpToolDiscoveryService.discover(id));
+    }
+
     @GetMapping("/{id}/connection")
     public ResponseEntity<McpConnectionResponse> connectionStatus(
             @PathVariable UUID id) {
@@ -64,7 +72,7 @@ public class McpToolResource {
 
     @GetMapping("/{id}")
     public ResponseEntity<McpServer> getTool(
-            @PathVariable @Positive(message = "id must be positive") String id) {
+            @PathVariable  String id) {
 
         return ResponseEntity.ok(mcpToolOperations.getTool(UUID.fromString(id)));
     }

@@ -105,7 +105,7 @@ class McpToolResourceTest {
     @Test
     void getTool_unknownId_returns404() throws Exception {
 
-        mvc.perform(get("/api/tools/999999"))
+        mvc.perform(get("/api/tools/00000000-0000-0000-0000-000000000001"))
                 .andExpect(status().isNotFound());
     }
 

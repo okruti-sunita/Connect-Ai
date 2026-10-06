@@ -1,5 +1,6 @@
 package com.connectai;
 
+import com.connectai.api.dto.EvidenceResponse;
 import com.connectai.api.dto.InvestigationResponse;
 import com.connectai.domain.EvidenceItem;
 import com.connectai.domain.Investigation;
@@ -31,7 +32,11 @@ class InvestigationServiceTest {
         InvestigationResponse response = service.get(saved.getId());
 
         assertThat(response.evidence()).hasSize(2);
-        assertThat(response.evidence().get(0).sourceRef()).isEqualTo("PR #1");
+
+        assertThat(response.evidence())
+                .extracting(EvidenceResponse::sourceRef)
+                .containsExactlyInAnyOrder("PR #1", "JIRA-1");
+
         assertThat(service.getEvidence(saved.getId())).hasSize(2);
     }
 }
