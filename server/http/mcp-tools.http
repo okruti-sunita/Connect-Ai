@@ -1,0 +1,21 @@
+### Discover tools exposed by a connected MCP server
+# Replace the UUID with the id returned by POST /connect-ai/api/tools
+GET http://localhost:8080/connect-ai/api/tools/8c1a5f2e-3e4a-4f8b-9c10-2b5a6d7e8f90/tools
+Accept: application/json
+
+###
+# Expected response shape:
+# {
+#   "serverId": "8c1a5f2e-3e4a-4f8b-9c10-2b5a6d7e8f90",
+#   "tools": [
+#     {
+#       "name": "create_issue",
+#       "title": "Create Issue",
+#       "description": "Creates an issue",
+#       "inputSchema": {
+#         "type": "object"
+#       },
+#       "outputSchema": {}
+#     }
+#   ]
+# }
