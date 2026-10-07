@@ -20,6 +20,8 @@ server:
   port: 8080
   error:
     include-message: always
+  servlet:
+    context-path: /connect-ai
 
 connectai:
   security:
