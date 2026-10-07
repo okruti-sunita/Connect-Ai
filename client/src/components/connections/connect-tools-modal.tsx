@@ -12,6 +12,7 @@ import '../connections/style/connect-tool-modal.scss';
 interface ToolConnectModalProps {
     open: boolean;
     onClose: () => void;
+    onToolRegistered: () => void;
 }
 
 interface ToolFormValues {
@@ -68,6 +69,7 @@ const ToolConnectModal = (props: ToolConnectModalProps) => {
             message.success("Tool registered successfully!")
             form.resetFields();
             setAuthType("NONE");
+            props.onToolRegistered();
             props.onClose();
 
         } catch (error) {

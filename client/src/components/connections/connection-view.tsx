@@ -79,8 +79,13 @@ const ConnectionView = () => {
                     </div>
                 ))}
             </div>
-            <ToolConnectModal open={open} onClose={handleCloseModal}/>
+            <ToolConnectModal
+                open={open}
+                onClose={handleCloseModal}
+                onToolRegistered={fetchRegisteredTools}
+            />
         </div>
     )
 }
+
 export default ConnectionView;
