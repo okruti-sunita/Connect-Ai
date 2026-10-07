@@ -1,30 +1,24 @@
-import {useNavigate} from "react-router-dom";
+import {useNavigate, useLocation} from "react-router-dom";
 import {
     Plus,
     Clock3,
-    Star,
     GitBranch,
-    Settings,
 } from "lucide-react";
 import '../navbar/style/navbar.scss'
-import {useState} from "react";
 
 const NavbarView = () => {
     const navigate = useNavigate();
-    const [selectedTab, setSelectedTab] = useState("new-investigation")
+    const location = useLocation();
 
     const handleNewInvestigationsButton = () => {
-        setSelectedTab("new-investigation")
         navigate("/");
     };
 
     const handleConnectionsButton = () => {
-        setSelectedTab("connections")
         navigate("/connections");
     };
 
     const handleInvestigations = () => {
-        setSelectedTab("investigations")
         navigate("/investigations");
     };
 
@@ -37,23 +31,16 @@ const NavbarView = () => {
 
                 {/* New Investigation */}
                 <button
-                    className={`nav-item ${selectedTab === "new-investigation" ? "active" : ""}`}
+                    className={`nav-item ${location.pathname === "/" ? "active" : ""}`}
                     onClick={handleNewInvestigationsButton}
                 >
-                    <div style={{display: "flex", gap: "8px", alignItems: "center"}}>
-                        <div>
-                            <Plus size={17}/>
-                        </div>
-                        <div>
-                            New Investigation
-                        </div>
-                    </div>
+                    <Plus size={17}/>
+                    <span>New Investigation</span>
                 </button>
-
 
                 {/* Connections */}
                 <button
-                    className={`nav-item ${selectedTab === "connections" ? "active" : ""}`}
+                    className={`nav-item ${location.pathname === "/connections" ? "active" : ""}`}
                     onClick={handleConnectionsButton}
                 >
                     <GitBranch size={17}/>
@@ -62,14 +49,12 @@ const NavbarView = () => {
 
                 {/* Investigations */}
                 <button
-                    className={`nav-item ${selectedTab === "investigations" ? "active" : ""}`}
+                    className={`nav-item ${location.pathname === "/investigations" ? "active" : ""}`}
                     onClick={handleInvestigations}
                 >
                     <Clock3 size={17}/>
                     <span>Investigations</span>
                 </button>
-
-
             </div>
         </nav>
     );
