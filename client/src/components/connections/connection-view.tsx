@@ -5,6 +5,7 @@ import ToolConnectModal from "./connect-tools-modal";
 
 const ConnectionView = () => {
     const [open, setOpen] = useState(false);
+    const [registeredTools, setRegisteredTools] = useState([])
 
     const handleConnectToolsButton = () => {
         setOpen(true);
@@ -18,7 +19,9 @@ const ConnectionView = () => {
             const response = await fetch(
                 'http://localhost:8080/connect-ai/api/tools'
             );
-            console.log("data:", response);
+            const data = await response.json();
+            setRegisteredTools(data);
+            console.log("data:", data);
         } catch (error) {
             console.error("Error while fetching data:", error);
         }
@@ -54,7 +57,27 @@ const ConnectionView = () => {
             </div>
 
             <div className={'registered-tools-container'}>
+                {registeredTools.map((tool) => (
+                    <div key={tool.id} className="card">
+                        <div className={'card-header'}>
+                            <div>
+                                <h3>{tool.name}</h3>
+                            </div>
+                            <div>
+                                <p className={`tool-status ${tool.status}`}>{tool.status}</p>
+                            </div>
+                        </div>
+                        <div className={'card-button-container'}>
+                            <button className={'card-button connect'}>
+                                Connect
+                            </button>
+                            <button className={'card-button disconnect'} disabled={tool.status === "REGISTERED"}>
+                                Disconnect
+                            </button>
+                        </div>
 
+                    </div>
+                ))}
             </div>
             <ToolConnectModal open={open} onClose={handleCloseModal}/>
         </div>

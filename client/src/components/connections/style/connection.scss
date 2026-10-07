@@ -59,4 +59,93 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px;
+
+  .card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, .06);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .tool-status {
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+
+      &.REGISTERED {
+        background-color: #e0e7ff;
+        color: #4338ca;
+      }
+
+      &.CONNECTED {
+        background-color: #dcfce7;
+        color: #15803d;
+      }
+
+      &.FAILED {
+        background-color: #fee2e2;
+        color: #dc2626;
+      }
+
+      &.DISCONNECTED {
+        background-color: #f3f4f6;
+        color: #4b5563;
+      }
+    }
+  }
+}
+
+.card-button-container {
+  display: flex;
+  gap: 10px;
+}
+
+.card-button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: fit-content;
+  height: 35px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 7px;
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+
+  &.connect {
+    background: #4f46e5;
+    color: #ffffff;
+
+    &:hover {
+      background: #4338ca;
+    }
+  }
+
+  &.disconnect {
+    color: #cf222e;
+    background-color: #ffffff;
+    border: 1px solid #e5e7eb;
+
+    &:hover {
+      background: #e5e7eb;
+    }
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+  }
 }

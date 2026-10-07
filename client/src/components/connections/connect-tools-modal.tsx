@@ -2,7 +2,7 @@ import * as React from "react";
 import {useState} from "react";
 import {
     Form,
-    Input,
+    Input, message,
     Modal,
     Select,
     Switch
@@ -65,12 +65,13 @@ const ToolConnectModal = (props: ToolConnectModalProps) => {
                     body: JSON.stringify(payload)
                 }
             );
-
+            message.success("Tool registered successfully!")
             form.resetFields();
             setAuthType("NONE");
             props.onClose();
 
         } catch (error) {
+            message.error("Error while registering tool!")
             console.error("Error while registering tool:", error);
         }
     };
