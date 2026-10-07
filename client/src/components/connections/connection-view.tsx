@@ -28,6 +28,27 @@ const ConnectionView = () => {
         }
     }
 
+    async function getConnectionStatus(id: string) {
+        try {
+            const response = await fetch(
+                `http://localhost:8080/connect-ai/api/tools/${id}/connection`
+            );
+            const data = await response.json();
+            setRegisteredTools((tools) =>
+                tools.map((tool) =>
+                    tool.id === id
+                        ? {
+                            ...tool,
+                            status: data.status
+                        }
+                        : tool
+                )
+            );
+        } catch (e) {
+            console.log("Error while fetching connection status", e);
+        }
+    }
+
     async function handleConnectButton(id: string) {
         try {
             const response = await fetch(`http://localhost:8080/connect-ai/api/tools/${id}/connect`,
@@ -43,7 +64,8 @@ const ConnectionView = () => {
             }
 
             message.success("MCP server connected successfully!")
-            await fetchRegisteredTools();
+            // await fetchRegisteredTools();
+            await getConnectionStatus(id);
         } catch (e) {
             console.log("Error while connecting to an MCP server", e);
             message.error("Failed to connect MCP server!")
