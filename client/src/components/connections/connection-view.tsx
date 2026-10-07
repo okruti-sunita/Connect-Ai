@@ -2,6 +2,7 @@ import {useEffect, useState} from "react";
 import {Plus} from "lucide-react";
 import '../connections/style/connection.scss'
 import ToolConnectModal from "./connect-tools-modal";
+import {message} from "antd";
 
 const ConnectionView = () => {
     const [open, setOpen] = useState(false);
@@ -24,6 +25,28 @@ const ConnectionView = () => {
             console.log("data:", data);
         } catch (error) {
             console.error("Error while fetching data:", error);
+        }
+    }
+
+    async function handleConnectButton(id: string) {
+        try {
+            const response = await fetch(`http://localhost:8080/connect-ai/api/tools/${id}/connect`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    // body: JSON.stringify(payload)
+                })
+            if (!response.ok) {
+                throw new Error(`API failed with status: ${response.status}`);
+            }
+
+            message.success("MCP server connected successfully!")
+            await fetchRegisteredTools();
+        } catch (e) {
+            console.log("Error while connecting to an MCP server", e);
+            message.error("Failed to connect MCP server!")
         }
     }
 
@@ -68,7 +91,7 @@ const ConnectionView = () => {
                             </div>
                         </div>
                         <div className={'card-button-container'}>
-                            <button className={'card-button connect'}>
+                            <button className={'card-button connect'} onClick={() => handleConnectButton(tool.id)}>
                                 Connect
                             </button>
                             <button className={'card-button disconnect'} disabled={tool.status === "REGISTERED"}>
