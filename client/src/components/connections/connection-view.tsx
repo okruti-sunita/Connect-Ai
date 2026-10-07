@@ -72,6 +72,28 @@ const ConnectionView = () => {
         }
     }
 
+    async function handleDisconnectButton(id: string) {
+        try {
+            const response = await fetch(`http://localhost:8080/connect-ai/api/tools/${id}/disconnect`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    // body: JSON.stringify(payload)
+                })
+            if (!response.ok) {
+                throw new Error(`API failed with status: ${response.status}`);
+            }
+
+            message.success("MCP server disconnected successfully!")
+            await getConnectionStatus(id);
+        } catch (e) {
+            console.log("Error while disconnecting a connection", e);
+            message.error("Failed to disconnect MCP server!")
+        }
+    }
+
     useEffect(() => {
         fetchRegisteredTools();
     }, []);
@@ -113,10 +135,13 @@ const ConnectionView = () => {
                             </div>
                         </div>
                         <div className={'card-button-container'}>
-                            <button className={'card-button connect'} onClick={() => handleConnectButton(tool.id)}>
+                            <button className={'card-button connect'} disabled={tool.status === "CONNECTED"}
+                                    onClick={() => handleConnectButton(tool.id)}>
                                 Connect
                             </button>
-                            <button className={'card-button disconnect'} disabled={tool.status === "REGISTERED"}>
+                            <button className={'card-button disconnect'}
+                                    disabled={tool.status === "REGISTERED" || tool.status === "DISCONNECTED"}
+                                    onClick={() => handleDisconnectButton(tool.id)}>
                                 Disconnect
                             </button>
                         </div>
