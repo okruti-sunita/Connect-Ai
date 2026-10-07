@@ -48,8 +48,6 @@ const NavbarView = () => {
                             New Investigation
                         </div>
                     </div>
-
-
                 </button>
 
 
