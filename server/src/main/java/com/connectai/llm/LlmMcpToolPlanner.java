@@ -1,5 +1,6 @@
 package com.connectai.llm;
 
+import com.connectai.agent.AgentExecutionState;
 import com.connectai.agent.DynamicToolPlanner;
 import com.connectai.agent.McpToolCandidate;
 import com.connectai.agent.ToolSelectionPlan;
@@ -64,6 +65,18 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
             String question,
             List<McpToolCandidate> availableTools) {
 
+        return plan(
+                question,
+                availableTools,
+                AgentExecutionState.initial(question));
+    }
+
+    @Override
+    public Optional<ToolSelectionPlan> plan(
+            String question,
+            List<McpToolCandidate> availableTools,
+            AgentExecutionState state) {
+
         if (question == null || question.isBlank()) {
             throw new IllegalArgumentException(
                     "question must not be blank");
@@ -94,7 +107,7 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
          */
         JsonNode decision = llm.callTool(
                 SYSTEM,
-                buildPrompt(question, availableTools),
+                buildPrompt(question, availableTools, state),
                 decisionTool(availableTools));
 
         if (decision == null || !decision.isObject()) {
@@ -217,12 +230,16 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
      */
     private static String buildPrompt(
             String question,
-            List<McpToolCandidate> tools) {
+            List<McpToolCandidate> tools,
+            AgentExecutionState state) {
 
         StringBuilder prompt = new StringBuilder();
 
         prompt.append("User question:\n")
                 .append(question)
+                .append("\n\n")
+                .append("Previous execution steps:\n")
+                .append(state.steps())
                 .append("\n\n")
                 .append("Available MCP tools:\n");
 

@@ -18,4 +18,17 @@ public interface DynamicToolPlanner {
     Optional<ToolSelectionPlan> plan(
             String question,
             List<McpToolCandidate> availableTools);
+
+    /**
+     * Plans the next step with visibility into the execution accumulated so far.
+     *
+     * The default implementation preserves the Task 6 contract for simple
+     * planners. Stateful planners should override this method.
+     */
+    default Optional<ToolSelectionPlan> plan(
+            String question,
+            List<McpToolCandidate> availableTools,
+            AgentExecutionState state) {
+        return plan(question, availableTools);
+    }
 }
