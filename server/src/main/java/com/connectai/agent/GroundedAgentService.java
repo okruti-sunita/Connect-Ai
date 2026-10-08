@@ -1,19 +1,16 @@
 package com.connectai.agent;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Objects;
 
 /**
- * Application-level composition of the controlled agent loop and grounded answer generation.
- *
- * This is intentionally separate from AgentOrchestrator so the legacy investigation
- * flow does not become a monolith.
+ * Application service that combines controlled agent execution with grounded
+ * final-answer generation. The execution and answer-generation responsibilities
+ * remain separate so the agent flow does not become a monolith.
  */
 @Service
-@ConditionalOnBean(ControlledAgentExecutor.class)
 public class GroundedAgentService {
 
     private final ControlledAgentExecutor executor;

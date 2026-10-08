@@ -59,6 +59,22 @@ class GroundedAnswerContextBuilderTest {
     }
 
     @Test
+    void excludesToolResultMarkedAsErrorEvenWhenStepStatusIsSuccess() {
+        ToolSelectionPlan plan = new ToolSelectionPlan(
+                SERVER_ID, "search_logs", Map.of(), "runtime lookup");
+        AgentExecutionState state = AgentExecutionState.initial("Investigate")
+                .addStep(new AgentExecutionStep(
+                        1, plan,
+                        new ToolExecutionResult(
+                                "search_logs", true,
+                                List.of(new ToolExecutionContent("text", "do not use this as evidence")), null),
+                        AgentStepStatus.SUCCESS));
+        GroundedAnswerContext context = new GroundedAnswerContextBuilder().build(state);
+        assertThat(context.evidence()).isEmpty();
+        assertThat(context.failedTools()).containsExactly("search_logs");
+    }
+
+    @Test
     void includesStructuredContentAsEvidence() {
         ToolSelectionPlan plan = new ToolSelectionPlan(
                 SERVER_ID,
@@ -110,4 +126,23 @@ class GroundedAnswerContextBuilderTest {
 
         assertThat(context.evidence()).isEmpty();
     }
+
+    @Test
+    void boundsOversizedEvidence() {
+        String large = "x".repeat(10_000);
+        ToolSelectionPlan plan = new ToolSelectionPlan(
+                SERVER_ID, "search_logs", Map.of(), "runtime lookup");
+        AgentExecutionState state = AgentExecutionState.initial("Investigate")
+                .addStep(new AgentExecutionStep(
+                        1, plan,
+                        new ToolExecutionResult(
+                                "search_logs", false,
+                                List.of(new ToolExecutionContent("text", large)), null),
+                        AgentStepStatus.SUCCESS));
+        GroundedAnswerContext context = new GroundedAnswerContextBuilder().build(state);
+        assertThat(context.evidence()).hasSize(1);
+        assertThat(context.evidence().get(0).content().length()).isEqualTo(4_001);
+        assertThat(context.evidence().get(0).content()).endsWith("…");
+    }
+
 }

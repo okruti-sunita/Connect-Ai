@@ -58,6 +58,19 @@ class LlmGroundedAnswerGeneratorTest {
     }
 
     @Test
+    void rejectsAnswerWithoutCitationAndUsesFallback() {
+        LlmClient llm = new StubLlmClient("The ticket was reopened.");
+        GroundedAnswerGenerator fallback =
+                new com.connectai.agent.TemplateGroundedAnswerGenerator(
+                        new GroundedAnswerContextBuilder());
+        GroundedAnswer answer = new LlmGroundedAnswerGenerator(
+                llm, new GroundedAnswerContextBuilder(),
+                new GroundingValidator(), fallback).generate(state());
+        assertThat(answer.fallbackUsed()).isTrue();
+        assertThat(answer.answer()).contains("[E1]");
+    }
+
+    @Test
     void usesFallbackWhenLlmThrows() {
         LlmClient llm = new StubLlmClient(null, true);
         GroundedAnswerGenerator fallback =
