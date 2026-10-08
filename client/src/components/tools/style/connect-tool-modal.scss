@@ -1,0 +1,261 @@
+$primary: #4f46e5;
+$ink: #172b4d;
+$muted: #656d76;
+$line: #e5e7eb;
+
+.tool-wizard-modal {
+  .wizard {
+    display: flex;
+    flex-direction: column;
+    color: $ink;
+  }
+
+  .wizard-head {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 24px 28px 8px;
+
+    h2 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 700;
+    }
+
+    p {
+      margin: 2px 0 0;
+      color: $muted;
+      font-size: 16px;
+    }
+  }
+
+  .wizard-steps {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    margin: 0;
+    padding: 8px 28px 18px;
+    list-style: none;
+    border-bottom: 1px solid $line;
+
+    li {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: $muted;
+      font-weight: 600;
+
+      span {
+        display: grid;
+        place-items: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        border: 1px solid #c7cbd6;
+        font-size: 13px;
+      }
+
+      &.current {
+        color: $ink;
+
+        span {
+          background: $primary;
+          border-color: $primary;
+          color: #fff;
+        }
+      }
+
+      &.done span {
+        background: #dcfce7;
+        border-color: #86efac;
+        color: #15803d;
+      }
+    }
+  }
+
+  .wizard-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    min-height: 380px;
+  }
+
+  .wizard-main {
+    padding: 22px 28px;
+    border-right: 1px solid $line;
+    max-height: 60vh;
+    overflow-y: auto;
+
+    h3 {
+      margin: 0 0 14px;
+      font-size: 20px;
+    }
+  }
+
+  .secure-note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    color: $muted;
+    font-size: 13px;
+  }
+
+  .wizard-about {
+    margin: 22px;
+    padding: 18px;
+    border-radius: 12px;
+    background: #f3f4f8;
+    align-self: start;
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 17px;
+    }
+
+    h4 {
+      margin: 16px 0 6px;
+      font-size: 14px;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    ul {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+
+      li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+
+        svg {
+          color: $primary;
+          flex: none;
+        }
+      }
+    }
+  }
+
+  .test-list {
+    list-style: none;
+    margin: 0 0 16px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+
+    li {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 600;
+      color: $muted;
+
+      &.active,
+      &.done {
+        color: $ink;
+      }
+    }
+
+    .test-icon {
+      display: grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 2px solid #d1d5db;
+      font-size: 13px;
+      flex: none;
+    }
+
+    .done .test-icon {
+      background: #16a34a;
+      border-color: #16a34a;
+      color: #fff;
+    }
+
+    .failed .test-icon {
+      background: #dc2626;
+      border-color: #dc2626;
+      color: #fff;
+    }
+
+    .active .test-icon {
+      border-color: $primary;
+      border-top-color: transparent;
+      animation: wizard-spin 1s linear infinite;
+    }
+  }
+
+  .test-error {
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: #fee2e2;
+    color: #b91c1c;
+    font-weight: 600;
+  }
+
+  .test-ok {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 10px;
+    color: #15803d;
+    font-weight: 600;
+  }
+
+  .cap-preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+
+    li {
+      padding: 3px 10px;
+      border-radius: 6px;
+      background: #eef0f6;
+      font-size: 13px;
+    }
+  }
+
+  .wizard-foot {
+    display: flex;
+    justify-content: space-between;
+    padding: 16px 28px;
+    border-top: 1px solid $line;
+  }
+
+  @media (max-width: 760px) {
+    .wizard-body {
+      grid-template-columns: 1fr;
+    }
+
+    .wizard-main {
+      border-right: none;
+    }
+
+    .wizard-about {
+      margin: 0 22px 22px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .test-list .active .test-icon {
+      animation: none;
+    }
+  }
+}
+
+@keyframes wizard-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
