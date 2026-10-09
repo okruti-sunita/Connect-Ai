@@ -68,13 +68,13 @@ const NavbarView = ({theme, onToggleTheme}: NavbarViewProps) => {
                     <span className="sb-opt sb-opt-dark"><Moon size={14}/>Dark</span>
                 </button>
 
-                <div className="sb-user">
-                    <div className="sb-avatar">{getInitials(CURRENT_USER.name)}</div>
-                    <div className="sb-user-info">
-                        <div className="sb-user-name">{CURRENT_USER.name}</div>
-                        <div className="sb-user-role">{CURRENT_USER.role}</div>
-                    </div>
-                </div>
+                {/*<div className="sb-user">*/}
+                {/*    <div className="sb-avatar">{getInitials(CURRENT_USER.name)}</div>*/}
+                {/*    <div className="sb-user-info">*/}
+                {/*        <div className="sb-user-name">{CURRENT_USER.name}</div>*/}
+                {/*        <div className="sb-user-role">{CURRENT_USER.role}</div>*/}
+                {/*    </div>*/}
+                {/*</div>*/}
             </div>
         </nav>
     );
