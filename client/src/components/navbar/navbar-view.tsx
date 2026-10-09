@@ -5,68 +5,76 @@ import {
     GitBranch,
     Moon,
     Sun,
+    ChevronRight,
 } from "lucide-react";
 import '../navbar/style/navbar.scss'
+import '../navbar/style/sidebar.scss'
 
 type NavbarViewProps = { theme: "light" | "dark"; onToggleTheme: () => void };
+
+// Change these to show the signed-in user in the sidebar footer.
+const CURRENT_USER = {name: "Sunita Ghangas", role: "Software Engineer"};
+
+const NAV_ITEMS = [
+    {path: "/", label: "New Investigation", icon: Plus},
+    {path: "/connections", label: "Connections", icon: GitBranch},
+    {path: "/investigations", label: "Investigations", icon: Clock3},
+];
+
+const getInitials = (name: string) =>
+    name
+        .split(" ")
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0].toUpperCase())
+        .join("");
 
 const NavbarView = ({theme, onToggleTheme}: NavbarViewProps) => {
     const navigate = useNavigate();
     const location = useLocation();
-
-    const handleNewInvestigationsButton = () => {
-        navigate("/");
-    };
-
-    const handleConnectionsButton = () => {
-        navigate("/connections");
-    };
-
-    const handleInvestigations = () => {
-        navigate("/investigations");
-    };
-
+    const isDark = theme === "dark";
 
     return (
-        <nav className="navbar">
+        <nav className="navbar sb">
+            <div className="sb-label">Workspace</div>
 
-            {/* Navigation */}
-            <div className="navbar-menu">
-
-                {/* New Investigation */}
-                <button
-                    className={`nav-item ${location.pathname === "/" ? "active" : ""}`}
-                    onClick={handleNewInvestigationsButton}
-                >
-                    <Plus size={17}/>
-                    <span>New Investigation</span>
-                </button>
-
-                {/* Connections */}
-                <button
-                    className={`nav-item ${location.pathname === "/connections" ? "active" : ""}`}
-                    onClick={handleConnectionsButton}
-                >
-                    <GitBranch size={17}/>
-                    <span>Connections</span>
-                </button>
-
-                {/* Investigations */}
-                <button
-                    className={`nav-item ${location.pathname === "/investigations" ? "active" : ""}`}
-                    onClick={handleInvestigations}
-                >
-                    <Clock3 size={17}/>
-                    <span>Investigations</span>
-                </button>
+            <div className="sb-menu">
+                {NAV_ITEMS.map(({path, label, icon: Icon}) => (
+                    <button
+                        key={path}
+                        type="button"
+                        className={`sb-item ${location.pathname === path ? "active" : ""}`}
+                        aria-current={location.pathname === path ? "page" : undefined}
+                        onClick={() => navigate(path)}
+                    >
+                        <span className="sb-icon"><Icon size={16}/></span>
+                        <span className="sb-text">{label}</span>
+                        <ChevronRight className="sb-chevron" size={15}/>
+                    </button>
+                ))}
             </div>
 
-            <div className="navbar-footer">
-                <button className="theme-toggle" type="button" onClick={onToggleTheme} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`}>
-                    {theme === "light" ? <Moon size={17}/> : <Sun size={17}/>}
-                    <span>{theme === "light" ? "Dark mode" : "Light mode"}</span>
-                    <span className={`theme-switch ${theme === "dark" ? "is-dark" : ""}`} aria-hidden="true"><span/></span>
+            <div className="sb-footer">
+                <button
+                    type="button"
+                    role="switch"
+                    aria-checked={isDark}
+                    aria-label={`Switch to ${isDark ? "light" : "dark"} theme`}
+                    className="sb-theme"
+                    onClick={onToggleTheme}
+                >
+                    <span className="sb-thumb" aria-hidden="true"/>
+                    <span className="sb-opt sb-opt-light"><Sun size={14}/>Light</span>
+                    <span className="sb-opt sb-opt-dark"><Moon size={14}/>Dark</span>
                 </button>
+
+                <div className="sb-user">
+                    <div className="sb-avatar">{getInitials(CURRENT_USER.name)}</div>
+                    <div className="sb-user-info">
+                        <div className="sb-user-name">{CURRENT_USER.name}</div>
+                        <div className="sb-user-role">{CURRENT_USER.role}</div>
+                    </div>
+                </div>
             </div>
         </nav>
     );

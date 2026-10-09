@@ -1,0 +1,285 @@
+/* ==========================================================================
+   Connect AI — sidebar redesign
+   Uses the shared theme tokens (--ca-*) from styles/aurora.scss.
+   ========================================================================== */
+
+/* Sticky full-height rail with the footer pinned to the bottom */
+.connectAI-layout.ant-layout-sider {
+  position: sticky !important;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.connectAI-layout .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar { display: none; }
+}
+
+/* ---------- Brand ---------- */
+.connectAI-layout .logo {
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 6px 8px 18px;
+  border-bottom: 1px solid var(--ca-line, rgba(148, 163, 184, 0.3));
+
+  .badge {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    font-size: 18px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #38bdf8, #6366f1 55%, #a855f7);
+    box-shadow: 0 6px 18px rgba(99, 102, 241, 0.45);
+  }
+
+  .logo-text {
+    display: flex;
+    flex-direction: column;
+    font-size: 17px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.15;
+
+    &::after {
+      margin-top: 3px;
+      color: var(--ca-text-soft, #64748b);
+      content: "Engineering Context Assistant";
+      font-size: 10.5px;
+      font-weight: 500;
+      letter-spacing: 0;
+    }
+  }
+}
+
+/* ---------- Layout of the nav column ---------- */
+.navbar.sb {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 2px 4px;
+  font-family: inherit;
+}
+
+.sb-label {
+  padding: 2px 12px 10px;
+  color: var(--ca-text-soft, #64748b);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  opacity: 0.85;
+  text-transform: uppercase;
+}
+
+.sb-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* ---------- Nav items ---------- */
+.sb-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 48px;
+  padding: 0 12px 0 8px;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  color: var(--ca-text-soft, #64748b);
+  cursor: pointer;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  text-align: left;
+  transition: background 200ms ease, color 200ms ease, transform 200ms ease, box-shadow 200ms ease;
+
+  .sb-icon {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    background: var(--ca-soft, rgba(15, 23, 42, 0.05));
+    transition: background 200ms ease, color 200ms ease, box-shadow 200ms ease, transform 200ms ease;
+  }
+
+  .sb-chevron {
+    margin-left: auto;
+    opacity: 0;
+    transform: translateX(-4px);
+    transition: opacity 200ms ease, transform 200ms ease;
+  }
+
+  &:hover {
+    background: var(--ca-hover, rgba(99, 102, 241, 0.08));
+    color: var(--ca-text, #172b4d);
+    transform: translateX(3px);
+
+    .sb-icon { background: var(--ca-tint, rgba(99, 102, 241, 0.12)); color: var(--ca-accent, #6366f1); }
+    .sb-chevron { opacity: 0.6; transform: translateX(0); }
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--ca-accent, #6366f1);
+    outline-offset: 2px;
+  }
+
+  &.active {
+    background: linear-gradient(120deg, rgba(56, 189, 248, 0.16), rgba(99, 102, 241, 0.22), rgba(168, 85, 247, 0.16));
+    box-shadow: inset 0 0 0 1px var(--ca-glass-border, rgba(148, 163, 184, 0.3)), 0 8px 22px rgba(99, 102, 241, 0.16);
+    color: var(--ca-text, #172b4d);
+    font-weight: 600;
+    transform: none;
+
+    &::before {
+      position: absolute;
+      top: 11px;
+      bottom: 11px;
+      left: 0;
+      width: 3px;
+      border-radius: 3px;
+      background: linear-gradient(180deg, #38bdf8, #a855f7);
+      content: "";
+    }
+
+    .sb-icon {
+      background: linear-gradient(135deg, #38bdf8, #6366f1 55%, #a855f7);
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.45);
+      color: #fff;
+    }
+
+    .sb-chevron { opacity: 0.7; transform: translateX(0); }
+  }
+}
+
+/* ---------- Footer: theme switch + user ---------- */
+.sb-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 20px;
+}
+
+.sb-theme {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: 100%;
+  padding: 4px;
+  border: 1px solid var(--ca-glass-border, rgba(148, 163, 184, 0.3));
+  border-radius: 14px;
+  background: var(--ca-glass, rgba(255, 255, 255, 0.66));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  cursor: pointer;
+
+  .sb-thumb {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 4px;
+    width: calc(50% - 4px);
+    border-radius: 10px;
+    background: linear-gradient(120deg, #6366f1, #a855f7);
+    box-shadow: 0 6px 16px rgba(99, 102, 241, 0.45);
+    transition: transform 280ms cubic-bezier(0.3, 0.8, 0.3, 1);
+  }
+
+  .sb-opt {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 34px;
+    color: var(--ca-text-soft, #64748b);
+    font-size: 13px;
+    font-weight: 600;
+    transition: color 220ms ease;
+  }
+
+  &[aria-checked="false"] .sb-opt-light,
+  &[aria-checked="true"] .sb-opt-dark { color: #fff; }
+
+  &[aria-checked="true"] .sb-thumb { transform: translateX(100%); }
+
+  &:focus-visible { outline: 2px solid var(--ca-accent, #6366f1); outline-offset: 2px; }
+}
+
+.sb-user {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 12px;
+  border: 1px solid var(--ca-glass-border, rgba(148, 163, 184, 0.3));
+  border-radius: 14px;
+  background: var(--ca-glass, rgba(255, 255, 255, 0.66));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+
+  .sb-avatar {
+    position: relative;
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #8b5cf6, #ec4899);
+    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+
+    &::after {
+      position: absolute;
+      right: -1px;
+      bottom: -1px;
+      width: 10px;
+      height: 10px;
+      border: 2px solid var(--ca-bg, #fff);
+      border-radius: 50%;
+      background: #22c55e;
+      content: "";
+    }
+  }
+
+  .sb-user-info { min-width: 0; }
+
+  .sb-user-name {
+    overflow: hidden;
+    color: var(--ca-text, #172b4d);
+    font-size: 14px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sb-user-role {
+    margin-top: 1px;
+    color: var(--ca-text-soft, #64748b);
+    font-size: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sb-item,
+  .sb-item .sb-icon,
+  .sb-item .sb-chevron,
+  .sb-theme .sb-thumb { transition: none !important; }
+}
