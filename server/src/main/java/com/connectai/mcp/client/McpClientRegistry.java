@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -43,5 +44,9 @@ public class McpClientRegistry {
 
     public boolean isConnected(UUID serverId) {
         return clients.containsKey(serverId);
+    }
+
+    public Set<UUID> connectedServerIds() {
+        return Set.copyOf(clients.keySet());
     }
 }
