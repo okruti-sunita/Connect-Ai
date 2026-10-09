@@ -1,7 +1,22 @@
+.connectAI-app-shell,
+.connectAI-root-layout,
+.connectAI-content-layout {
+  min-height: 100vh;
+  background: var(--app-bg) !important;
+}
+
+.connectAI-layout.ant-layout-sider {
+  flex: 0 0 250px !important;
+  max-width: 250px !important;
+  min-width: 250px !important;
+  width: 250px !important;
+}
+
 .connectAI-layout {
-  background: #ffffff !important;
-  border-right: 1px solid #e5e7eb;
+  background: var(--surface) !important;
+  border-right: 1px solid var(--border-color);
   padding: 16px 12px;
+  min-height: 100vh;
 
   .logo {
     display: flex;
@@ -23,7 +38,7 @@
     }
 
     .logo-text {
-      color: #111827;
+      color: var(--text-primary);
       font-size: 16px;
       font-weight: 600;
     }

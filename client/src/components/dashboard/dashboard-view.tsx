@@ -1,6 +1,18 @@
+import {useState} from "react";
+import {useNavigate} from "react-router-dom";
 import './style/dashboard.scss';
 
 const DashboardView = () => {
+
+    const navigate = useNavigate();
+    const [question, setQuestion] = useState('');
+
+    // Opens the Investigations page and starts a run with this question
+    const startInvestigation = () => {
+        const trimmed = question.trim();
+        if (!trimmed) return;
+        navigate('/investigations', {state: {question: trimmed}});
+    };
 
     const getCurrentGreeting = () => {
         const currentHour = new Date().getHours();
@@ -41,6 +53,7 @@ const DashboardView = () => {
                         <div
                             key={index}
                             className="suggestion-button"
+                            onClick={() => setQuestion(suggestion)}
                         >
                             {suggestion}
                         </div>
@@ -51,6 +64,14 @@ const DashboardView = () => {
 
                 <textarea
                     className="investigation-textarea"
+                    value={question}
+                    onChange={(e) => setQuestion(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            startInvestigation();
+                        }
+                    }}
                     placeholder="Ask a question about your code, incidents, deployments or engineering systems..."
                 />
 
@@ -86,6 +107,8 @@ const DashboardView = () => {
                         <button
                             type="button"
                             className="investigate-button"
+                            onClick={startInvestigation}
+                            disabled={!question.trim()}
                         >
                             Investigate
                         </button>

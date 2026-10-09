@@ -3,10 +3,14 @@ import {
     Plus,
     Clock3,
     GitBranch,
+    Moon,
+    Sun,
 } from "lucide-react";
 import '../navbar/style/navbar.scss'
 
-const NavbarView = () => {
+type NavbarViewProps = { theme: "light" | "dark"; onToggleTheme: () => void };
+
+const NavbarView = ({theme, onToggleTheme}: NavbarViewProps) => {
     const navigate = useNavigate();
     const location = useLocation();
 
@@ -54,6 +58,14 @@ const NavbarView = () => {
                 >
                     <Clock3 size={17}/>
                     <span>Investigations</span>
+                </button>
+            </div>
+
+            <div className="navbar-footer">
+                <button className="theme-toggle" type="button" onClick={onToggleTheme} aria-label={`Switch to ${theme === "light" ? "dark" : "light"} theme`}>
+                    {theme === "light" ? <Moon size={17}/> : <Sun size={17}/>}
+                    <span>{theme === "light" ? "Dark mode" : "Light mode"}</span>
+                    <span className={`theme-switch ${theme === "dark" ? "is-dark" : ""}`} aria-hidden="true"><span/></span>
                 </button>
             </div>
         </nav>
