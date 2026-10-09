@@ -39,42 +39,42 @@ const InvestigationList = ({ items, loading, starting, onOpen, onStart }: Props)
                     <h1>Investigations</h1>
                     <p>Ask a question, paste an alert, or link a ticket. Connect AI will gather evidence from your connected tools.</p>
                 </div>
-                <button type="button" className="btn-outline" onClick={() => document.getElementById("inv-question")?.focus()}>
-                    New investigation
-                </button>
+                {/*<button type="button" className="btn-outline" onClick={() => document.getElementById("inv-question")?.focus()}>*/}
+                {/*    New investigation*/}
+                {/*</button>*/}
             </div>
 
-            <div className="inv-start-card">
-                <h2>Start a new investigation</h2>
-                <Input.TextArea
-                    id="inv-question"
-                    rows={3}
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
-                    placeholder="e.g. Why is checkout latency spiking in prod since 10am?"
-                />
-                <div className="inv-start-actions">
-                    <div className="quick-chips">
-                        {QUICK_ACTIONS.map((a) => (
-                            <button key={a} type="button" onClick={() => setQuestion((q) => (q ? `${q}\n${a}: ` : `${a}: `))}>
-                                {a}
-                            </button>
-                        ))}
-                    </div>
-                    <button type="button" className="btn-primary" onClick={submit} disabled={!question.trim() || starting}>
-                        <Sparkles size={16} /> {starting ? "Starting..." : "Investigate"}
-                    </button>
-                </div>
-            </div>
+            {/*<div className="inv-start-card">*/}
+            {/*    <h2>Start a new investigation</h2>*/}
+            {/*    <Input.TextArea*/}
+            {/*        id="inv-question"*/}
+            {/*        rows={3}*/}
+            {/*        value={question}*/}
+            {/*        onChange={(e) => setQuestion(e.target.value)}*/}
+            {/*        placeholder="e.g. Why is checkout latency spiking in prod since 10am?"*/}
+            {/*    />*/}
+            {/*    <div className="inv-start-actions">*/}
+            {/*        <div className="quick-chips">*/}
+            {/*            {QUICK_ACTIONS.map((a) => (*/}
+            {/*                <button key={a} type="button" onClick={() => setQuestion((q) => (q ? `${q}\n${a}: ` : `${a}: `))}>*/}
+            {/*                    {a}*/}
+            {/*                </button>*/}
+            {/*            ))}*/}
+            {/*        </div>*/}
+            {/*        <button type="button" className="btn-primary" onClick={submit} disabled={!question.trim() || starting}>*/}
+            {/*            <Sparkles size={16} /> {starting ? "Starting..." : "Investigate"}*/}
+            {/*        </button>*/}
+            {/*    </div>*/}
+            {/*</div>*/}
 
-            <div className="inv-filters">
-                <Select defaultValue="all" options={[{ value: "all", label: "Scope: All connected tools" }]} />
-                <Select defaultValue="24h" options={[
-                    { value: "1h", label: "Time window: Last 1h" },
-                    { value: "24h", label: "Time window: Last 24h" },
-                    { value: "7d", label: "Time window: Last 7d" }
-                ]} />
-            </div>
+            {/*<div className="inv-filters">*/}
+            {/*    <Select defaultValue="all" options={[{ value: "all", label: "Scope: All connected tools" }]} />*/}
+            {/*    <Select defaultValue="24h" options={[*/}
+            {/*        { value: "1h", label: "Time window: Last 1h" },*/}
+            {/*        { value: "24h", label: "Time window: Last 24h" },*/}
+            {/*        { value: "7d", label: "Time window: Last 7d" }*/}
+            {/*    ]} />*/}
+            {/*</div>*/}
 
             <div className="inv-list-head">
                 <h2>Recent investigations</h2>

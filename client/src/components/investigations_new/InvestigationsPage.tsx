@@ -6,10 +6,6 @@ import InvestigationDetail from "./InvestigationDetail";
 import { listInvestigations, startInvestigation } from "./api";
 import type { InvestigationSummary } from "./types";
 
-/*
- * Entry point: renders the list, or the detail view when one is selected.
- * To use routes later, replace `selectedId` with a route param (/investigations/:id).
- */
 const InvestigationsPage = () => {
     const [items, setItems] = useState<InvestigationSummary[]>([]);
     const [loading, setLoading] = useState(true);
