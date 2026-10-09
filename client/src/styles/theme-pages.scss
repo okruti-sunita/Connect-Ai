@@ -1,0 +1,467 @@
+/* ==========================================================================
+   Connect AI — page theme layer
+   Loaded LAST (after App) so it can re-colour every page with the shared
+   light / dark tokens and let the aurora background show through.
+   Sets the colours only; layout and spacing stay in each page's own SCSS.
+   ========================================================================== */
+
+:root {
+  --ca-tint: rgba(99, 102, 241, 0.10);
+  --ca-tint-strong: rgba(99, 102, 241, 0.18);
+  --ca-tint-text: #3730a3;
+  --ca-soft: rgba(15, 23, 42, 0.05);
+  --ca-hover: rgba(99, 102, 241, 0.08);
+  --ca-line: rgba(148, 163, 184, 0.35);
+  --ca-ok: #16a34a;
+  --ca-ok-bg: rgba(34, 197, 94, 0.15);
+  --ca-warn: #b45309;
+  --ca-warn-bg: rgba(245, 158, 11, 0.17);
+  --ca-bad: #b91c1c;
+  --ca-bad-bg: rgba(239, 68, 68, 0.13);
+  --ca-add-bg: rgba(34, 197, 94, 0.16);
+  --ca-del-bg: rgba(239, 68, 68, 0.15);
+  --ca-grad: linear-gradient(120deg, #3b82f6, #6366f1, #a855f7, #3b82f6);
+}
+
+:root[data-theme="dark"] {
+  --ca-tint: rgba(129, 140, 248, 0.16);
+  --ca-tint-strong: rgba(129, 140, 248, 0.28);
+  --ca-tint-text: #c7d2fe;
+  --ca-soft: rgba(255, 255, 255, 0.07);
+  --ca-hover: rgba(129, 140, 248, 0.14);
+  --ca-line: rgba(129, 140, 248, 0.22);
+  --ca-ok: #4ade80;
+  --ca-ok-bg: rgba(34, 197, 94, 0.18);
+  --ca-warn: #fbbf24;
+  --ca-warn-bg: rgba(245, 158, 11, 0.20);
+  --ca-bad: #f87171;
+  --ca-bad-bg: rgba(239, 68, 68, 0.20);
+  --ca-add-bg: rgba(34, 197, 94, 0.20);
+  --ca-del-bg: rgba(239, 68, 68, 0.22);
+}
+
+@mixin ca-glass($strong: false) {
+  @if $strong {
+    background: var(--ca-glass-strong) !important;
+  } @else {
+    background: var(--ca-glass) !important;
+  }
+  border-color: var(--ca-glass-border) !important;
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  box-shadow: var(--ca-shadow);
+}
+
+@mixin ca-gradient-button {
+  background: var(--ca-grad) !important;
+  background-size: 240% 100% !important;
+  border: 0 !important;
+  color: #fff !important;
+  box-shadow: 0 6px 18px rgba(99, 102, 241, 0.32);
+  animation: ca-button 6s ease-in-out infinite;
+  transition: transform 180ms ease, box-shadow 180ms ease !important;
+
+  &:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 26px rgba(99, 102, 241, 0.42);
+  }
+}
+
+/* ---------- App shell: let the aurora show through ---------- */
+.connectAI-app-shell,
+.connectAI-root-layout,
+.connectAI-content-layout,
+.connectAI-content-layout .ant-layout-content {
+  background: transparent !important;
+}
+
+.theme-toggle {
+  @include ca-glass;
+  color: var(--ca-text-soft) !important;
+
+  &:hover { background: var(--ca-hover) !important; color: var(--ca-text) !important; }
+}
+
+.theme-switch.is-dark { background: linear-gradient(120deg, #6366f1, #a855f7) !important; }
+
+/* ---------- Shared page text ---------- */
+.inv-page,
+.tools-page,
+.connections-container {
+  background: transparent !important;
+  color: var(--ca-text) !important;
+
+  h1, h2, h3, h4, h5 { color: var(--ca-text); }
+}
+
+/* ---------- Shared buttons ---------- */
+.btn-primary,
+.add-tool-btn,
+.connect-tools-button,
+.card-button.connect,
+.tools-page .add-tool-btn {
+  @include ca-gradient-button;
+}
+
+.tools-page .chips .chip[aria-pressed='true'],
+.chip.active {
+  background: var(--ca-grad) !important;
+  background-size: 240% 100% !important;
+  border-color: transparent !important;
+  color: #fff !important;
+}
+
+.btn-outline,
+.refresh-tools-button,
+.card-button.disconnect,
+.btn-secondary,
+.tool-register-modal .ant-modal-footer .ant-btn-default {
+  background: var(--ca-glass-strong) !important;
+  border: 1px solid var(--ca-accent) !important;
+  color: var(--ca-accent) !important;
+
+  &:hover:not(:disabled) { background: var(--ca-hover) !important; }
+}
+
+.inv-page .detail-actions .btn-outline {
+  border-color: var(--ca-glass-border) !important;
+  color: var(--ca-text) !important;
+}
+
+.avatar { box-shadow: 0 2px 8px rgba(124, 58, 237, 0.35); }
+
+/* ==========================================================================
+   Investigations
+   ========================================================================== */
+.inv-page {
+  .inv-loading,
+  .inv-empty,
+  .inv-header p,
+  .crumbs,
+  .crumbs button,
+  .run-kicker,
+  .run-head p,
+  .run-gathering,
+  .drawer-muted { color: var(--ca-text-soft) !important; }
+
+  .crumbs button:hover { color: var(--ca-accent) !important; }
+
+  .inv-start-card,
+  .inv-list,
+  .run-card,
+  .ev-chip {
+    @include ca-glass;
+  }
+
+  .inv-start-card {
+    border: 1px solid var(--ca-glass-border);
+    border-radius: 16px;
+  }
+
+  .inv-list { border: 1px solid var(--ca-glass-border); }
+
+  .inv-row {
+    background: transparent !important;
+    border-bottom-color: var(--ca-line) !important;
+    color: var(--ca-text) !important;
+
+    &:hover { background: var(--ca-hover) !important; }
+    .inv-ago { color: var(--ca-text-soft) !important; }
+    svg:last-child { color: var(--ca-text-soft) !important; }
+  }
+
+  .quick-chips button {
+    background: var(--ca-tint) !important;
+    color: var(--ca-tint-text) !important;
+
+    &:hover { background: var(--ca-tint-strong) !important; transform: translateY(-1px); }
+  }
+
+  .tag-chip {
+    background: var(--ca-glass) !important;
+    border-color: var(--ca-line) !important;
+    color: var(--ca-text-soft) !important;
+
+    &.accent {
+      background: var(--ca-warn-bg) !important;
+      border-color: rgba(245, 158, 11, 0.55) !important;
+      color: var(--ca-warn) !important;
+    }
+  }
+
+  .run-card {
+    border: 1px solid var(--ca-glass-border);
+
+    h4 { color: var(--ca-text); small { color: var(--ca-text-soft); } }
+    p { color: var(--ca-text-soft) !important; }
+
+    &:hover { border-color: var(--ca-accent) !important; transform: translateY(-2px); }
+
+    .relevance {
+      color: var(--ca-text-soft);
+      b { color: var(--ca-text); }
+      .bar { background: var(--ca-soft) !important; i { background: var(--ca-grad) !important; } }
+    }
+  }
+
+  .run-summary {
+    background: var(--ca-tint) !important;
+    border-color: var(--ca-accent) !important;
+    color: var(--ca-text);
+  }
+
+  .next-steps svg { color: var(--ca-text-soft) !important; }
+
+  .status-pill {
+    &.resolved { background: var(--ca-ok-bg) !important; color: var(--ca-ok) !important; }
+    &.in-progress { background: var(--ca-warn-bg) !important; color: var(--ca-warn) !important; }
+    &.archived { background: var(--ca-soft) !important; color: var(--ca-text-soft) !important; }
+  }
+
+  .inv-status.archived { color: var(--ca-text-soft); }
+
+  .run-steps {
+    border: 1px solid var(--ca-glass-border);
+    box-shadow: var(--ca-shadow);
+  }
+}
+
+/* Evidence drawer (rendered in a portal) */
+.evidence-drawer {
+  color: var(--ca-text);
+
+  .drawer-head p,
+  .drawer-muted { color: var(--ca-text-soft) !important; }
+
+  .drawer-box {
+    background: var(--ca-soft) !important;
+    border-color: var(--ca-line) !important;
+    color: var(--ca-text);
+  }
+
+  .pill {
+    border-color: var(--ca-line) !important;
+    color: var(--ca-text-soft) !important;
+
+    &.blue { background: var(--ca-tint) !important; border-color: transparent !important; color: var(--ca-tint-text) !important; }
+  }
+
+  .diff-view { border-color: var(--ca-line) !important; }
+  .diff-line {
+    color: var(--ca-text);
+    &.add { background: var(--ca-add-bg) !important; }
+    &.del { background: var(--ca-del-bg) !important; }
+  }
+
+  .reasoning { background: var(--ca-tint) !important; color: var(--ca-tint-text) !important; }
+  .drawer-footer .btn-outline { border-color: var(--ca-glass-border) !important; color: var(--ca-text) !important; }
+}
+
+/* ==========================================================================
+   Tools
+   ========================================================================== */
+.tools-page {
+  .page-sub,
+  .empty-note,
+  .mut,
+  .conn-status,
+  .crumbs,
+  .hint-note,
+  .detail-title p,
+  .cap-row p,
+  .cap-text p,
+  .detail-list dt,
+  .info-tiles span,
+  .icon-btn,
+  .catalog-card.custom span { color: var(--ca-text-soft) !important; }
+
+  .conn-id .name,
+  .catalog-card p,
+  .catalog-card.custom { color: var(--ca-text) !important; }
+
+  .link-btn,
+  .cap-row code,
+  .cap-text code { color: var(--ca-accent) !important; }
+
+  .icon-btn:hover { background: var(--ca-hover) !important; }
+
+  .conn-card,
+  .catalog-card:not(.custom),
+  .detail-tabs,
+  .side-card {
+    @include ca-glass;
+    border: 1px solid var(--ca-glass-border);
+  }
+
+  .conn-card,
+  .catalog-card:not(.custom) {
+    transition: transform 200ms ease, border-color 200ms ease, box-shadow 200ms ease;
+
+    &:hover { transform: translateY(-4px); border-color: var(--ca-accent) !important; }
+  }
+
+  .catalog-card.custom {
+    border-color: var(--ca-line) !important;
+
+    &:hover { border-color: var(--ca-accent) !important; color: var(--ca-accent) !important; }
+  }
+
+  .chips .chip {
+    background: var(--ca-glass-strong) !important;
+    border-color: var(--ca-glass-border) !important;
+    color: var(--ca-text) !important;
+    transition: transform 160ms ease, border-color 160ms ease !important;
+
+    &:hover { border-color: var(--ca-accent) !important; transform: translateY(-1px); }
+  }
+
+  .pill {
+    background: var(--ca-soft) !important;
+    color: var(--ca-text-soft) !important;
+
+    &.bad { background: var(--ca-bad-bg) !important; color: var(--ca-bad) !important; }
+    &.warn { background: var(--ca-warn-bg) !important; color: var(--ca-warn) !important; }
+  }
+
+  .inline-alert { background: var(--ca-bad-bg) !important; color: var(--ca-bad) !important; }
+  .field-error { color: var(--ca-bad) !important; }
+
+  .host-chip,
+  .info-tiles div,
+  .cap-icon,
+  .param-list { background: var(--ca-soft) !important; color: var(--ca-text); }
+
+  .info-tiles strong { color: var(--ca-text); }
+
+  .run-out {
+    background: var(--ca-soft) !important;
+    color: var(--ca-text);
+
+    &.ok strong { color: var(--ca-ok) !important; }
+    &.bad { background: var(--ca-bad-bg) !important; strong { color: var(--ca-bad) !important; } }
+  }
+
+  .detail-head,
+  .detail-list div { border-bottom-color: var(--ca-line) !important; }
+
+  .cap-row,
+  .cap-item { border-color: var(--ca-line) !important; }
+}
+
+/* Connect-tool wizard + register modal */
+.tool-wizard-modal,
+.tool-register-modal {
+  .wizard,
+  .modal-hero h2,
+  .modal-main h3,
+  .wizard-main h3,
+  .wizard-head h2 { color: var(--ca-text) !important; }
+
+  .wizard-head p,
+  .modal-hero p,
+  .secure-note,
+  .wizard-steps li,
+  .modal-stepper { color: var(--ca-text-soft) !important; }
+
+  .wizard-steps li.current { color: var(--ca-text) !important; }
+  .wizard-steps li span { border-color: var(--ca-glass-border) !important; }
+  .wizard-steps li.current span { background: var(--ca-grad) !important; border-color: transparent !important; color: #fff !important; }
+
+  .wizard-steps,
+  .wizard-main,
+  .wizard-foot,
+  .modal-stepper { border-color: var(--ca-line) !important; }
+
+  .wizard-about,
+  .modal-aside { background: var(--ca-soft) !important; color: var(--ca-text); p { color: var(--ca-text-soft) !important; } }
+  .wizard-about h3, .wizard-about h4, .modal-aside h4, .modal-aside h5 { color: var(--ca-text) !important; }
+
+  .cap-preview li { background: var(--ca-soft) !important; color: var(--ca-text) !important; }
+  .test-list li { color: var(--ca-text-soft) !important; &.active, &.done { color: var(--ca-text) !important; } }
+  .test-error { background: var(--ca-bad-bg) !important; color: var(--ca-bad) !important; }
+  .test-ok { color: var(--ca-ok) !important; }
+
+  .ant-modal-footer { background: transparent !important; border-top-color: var(--ca-line) !important; }
+}
+
+/* Old Connections page (connection.scss), kept consistent */
+.connections-container {
+  .header .title,
+  .section-title,
+  .registered-tools-container .card h3,
+  .catalog-grid .catalog-card h4 { color: var(--ca-text) !important; }
+
+  .header .sub-title,
+  .registered-tools-container .tool-endpoint,
+  .catalog-grid .catalog-card p { color: var(--ca-text-soft) !important; }
+
+  .registered-tools-container .card,
+  .catalog-grid .catalog-card:not(.custom) {
+    @include ca-glass;
+    border: 1px solid var(--ca-glass-border);
+  }
+
+  .chip { background: var(--ca-glass-strong) !important; color: var(--ca-text) !important; border-color: var(--ca-glass-border) !important; }
+}
+
+/* ==========================================================================
+   Ant Design components (its default tokens are light-only)
+   ========================================================================== */
+:root[data-theme="dark"] {
+  .ant-modal .ant-modal-title,
+  .ant-drawer .ant-drawer-title,
+  .ant-form-item-label > label,
+  .ant-typography,
+  .ant-empty-description,
+  .ant-tabs .ant-tabs-tab,
+  .ant-tabs .ant-tabs-tab .ant-tabs-tab-btn,
+  .ant-select-selection-item,
+  .ant-select-arrow,
+  .ant-input-clear-icon,
+  .ant-modal-close,
+  .ant-drawer-close,
+  .ant-table-thead > tr > th,
+  .ant-table-tbody > tr > td,
+  .ant-radio-wrapper,
+  .ant-checkbox-wrapper { color: var(--ca-text) !important; }
+
+  .ant-form-item-extra,
+  .ant-input::placeholder,
+  .ant-select-selection-placeholder,
+  textarea.ant-input::placeholder { color: var(--ca-text-soft) !important; opacity: 1; }
+
+  .ant-tabs .ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn { color: var(--ca-accent) !important; }
+  .ant-tabs .ant-tabs-nav::before { border-bottom-color: var(--ca-line) !important; }
+
+  .ant-btn-default:not(.ant-btn-primary) {
+    background: var(--ca-glass-strong);
+    border-color: var(--ca-glass-border);
+    color: var(--ca-text);
+  }
+
+  .ant-select-dropdown {
+    background: #151b33 !important;
+    border: 1px solid var(--ca-glass-border);
+  }
+
+  .ant-select-item { color: var(--ca-text) !important; }
+  .ant-select-item-option-active:not(.ant-select-item-option-disabled) { background: var(--ca-hover) !important; }
+  .ant-select-item-option-selected:not(.ant-select-item-option-disabled) { background: var(--ca-tint) !important; }
+
+  .ant-drawer .ant-drawer-header { border-bottom-color: var(--ca-line) !important; background: transparent !important; }
+  .ant-drawer .ant-drawer-body { color: var(--ca-text); }
+  .ant-drawer .ant-drawer-content { background: var(--ca-glass-strong) !important; }
+}
+
+.ant-select-selector,
+.ant-input-affix-wrapper,
+textarea.ant-input {
+  border-radius: 10px !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn-primary,
+  .add-tool-btn,
+  .connect-tools-button,
+  .card-button.connect { animation: none !important; }
+}
