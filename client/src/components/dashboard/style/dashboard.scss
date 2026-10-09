@@ -421,3 +421,253 @@ body[data-theme="dark"] .container,
   }
 }
 
+
+/* ==========================================================================
+   Aurora landing refresh — animated gradient background, glowing composer
+   Appended last on purpose so it overrides the earlier blocks.
+   ========================================================================== */
+
+@property --aurora-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.container {
+  --aurora-1: rgba(96, 165, 250, 0.42);
+  --aurora-2: rgba(244, 114, 182, 0.30);
+  --aurora-3: rgba(167, 139, 250, 0.40);
+  --ring-opacity: 0.55;
+  --glow-opacity: 0.20;
+  --title-from: #0f172a;
+  --title-mid: #4f46e5;
+  --title-to: #db2777;
+
+  background: var(--page-bg, #f8fafc);
+
+  /* Two big blurred colour fields that drift slowly */
+  &::before,
+  &::after {
+    width: 52vmax;
+    height: 52vmax;
+    border: 0;
+    border-radius: 50%;
+    filter: blur(72px);
+    will-change: transform;
+  }
+
+  &::before {
+    top: -16vmax;
+    right: -10vmax;
+    bottom: auto;
+    left: auto;
+    background:
+      radial-gradient(circle at 30% 30%, var(--aurora-1), transparent 62%),
+      radial-gradient(circle at 72% 70%, var(--aurora-2), transparent 60%);
+    animation: aurora-drift-a 16s ease-in-out infinite alternate;
+  }
+
+  &::after {
+    top: auto;
+    right: auto;
+    bottom: -20vmax;
+    left: -12vmax;
+    background:
+      radial-gradient(circle at 40% 40%, var(--aurora-3), transparent 62%),
+      radial-gradient(circle at 76% 60%, var(--aurora-1), transparent 58%);
+    animation: aurora-drift-b 21s ease-in-out infinite alternate;
+  }
+
+  /* Headline: slowly shifting gradient text */
+  .header .title {
+    background: linear-gradient(
+      100deg,
+      var(--title-from) 0%,
+      var(--title-from) 30%,
+      var(--title-mid) 52%,
+      var(--title-to) 70%,
+      var(--title-from) 100%
+    );
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    animation: aurora-title 9s ease-in-out infinite alternate;
+  }
+
+  /* Suggestion cards: frosted glass */
+  .suggestions-container .suggestion-button {
+    backdrop-filter: blur(14px) saturate(1.3);
+    -webkit-backdrop-filter: blur(14px) saturate(1.3);
+    background: var(--glass-bg, rgba(255, 255, 255, 0.62));
+    border-color: var(--glass-border, rgba(255, 255, 255, 0.85));
+    box-shadow: 0 6px 22px rgba(79, 70, 229, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+
+    &:hover {
+      background: var(--glass-hover, rgba(255, 255, 255, 0.92));
+      border-color: var(--accent-color, #a5b4fc);
+      box-shadow: 0 14px 34px rgba(99, 102, 241, 0.16);
+    }
+  }
+
+  /* Composer: animated gradient ring + soft glow */
+  .investigation-container {
+    position: relative;
+    border-color: transparent;
+    background: var(--glass-strong, rgba(255, 255, 255, 0.88));
+    backdrop-filter: blur(18px) saturate(1.3);
+    -webkit-backdrop-filter: blur(18px) saturate(1.3);
+    box-shadow: 0 22px 70px rgba(79, 70, 229, 0.10), 0 2px 8px rgba(15, 23, 42, 0.04);
+
+    &::before,
+    &::after {
+      position: absolute;
+      border-radius: inherit;
+      content: "";
+      pointer-events: none;
+      background: conic-gradient(
+        from var(--aurora-angle),
+        #38bdf8, #6366f1, #a855f7, #ec4899, #38bdf8
+      );
+      animation: aurora-spin 7s linear infinite;
+      transition: opacity 300ms ease;
+    }
+
+    /* the 1.5px rotating ring */
+    &::before {
+      inset: 0;
+      padding: 1.5px;
+      opacity: var(--ring-opacity);
+      -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+      -webkit-mask-composite: xor;
+      mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+      mask-composite: exclude;
+    }
+
+    /* the glow sitting behind the card */
+    &::after {
+      inset: -6px;
+      z-index: -1;
+      border-radius: 28px;
+      filter: blur(26px);
+      opacity: var(--glow-opacity);
+    }
+
+    &:hover,
+    &:focus-within {
+      --ring-opacity: 1;
+      --glow-opacity: 0.42;
+      box-shadow: 0 22px 70px rgba(79, 70, 229, 0.14), 0 2px 8px rgba(15, 23, 42, 0.04);
+    }
+
+    .investigation-textarea {
+      caret-color: var(--accent-color, #6366f1);
+    }
+
+    .investigation-footer .tools-section .tool-badges .tool-badge {
+      transition: transform 180ms ease;
+
+      &:hover { transform: translateY(-3px) rotate(-4deg); }
+    }
+
+    /* Investigate button: moving gradient + pulse ring */
+    .investigation-footer .investigate-button {
+      position: relative;
+      background: linear-gradient(120deg, #3b82f6, #6366f1, #a855f7, #3b82f6);
+      background-size: 240% 100%;
+      animation: aurora-button 6s ease-in-out infinite;
+
+      &:hover:not(:disabled) {
+        background: linear-gradient(120deg, #3b82f6, #6366f1, #a855f7, #3b82f6);
+        background-size: 240% 100%;
+      }
+
+      &:not(:disabled)::after {
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.55);
+        content: "";
+        pointer-events: none;
+        animation: aurora-pulse 2.6s ease-out infinite;
+      }
+    }
+  }
+}
+
+/* Dark theme — deeper base, brighter aurora */
+:root[data-theme="dark"] .container,
+body[data-theme="dark"] .container,
+.dark .container {
+  --aurora-1: rgba(59, 130, 246, 0.50);
+  --aurora-2: rgba(168, 85, 247, 0.46);
+  --aurora-3: rgba(34, 211, 238, 0.30);
+  --ring-opacity: 0.75;
+  --glow-opacity: 0.34;
+  --title-from: #f8fafc;
+  --title-mid: #a5b4fc;
+  --title-to: #f0abfc;
+  --glass-bg: rgba(20, 28, 52, 0.55);
+  --glass-hover: rgba(30, 41, 76, 0.85);
+  --glass-border: rgba(129, 140, 248, 0.20);
+  --glass-strong: rgba(11, 16, 36, 0.78);
+
+  &::before,
+  &::after { filter: blur(80px); }
+
+  .suggestions-container .suggestion-button {
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+    &:hover { box-shadow: 0 14px 36px rgba(99, 102, 241, 0.28); }
+  }
+
+  .investigation-container {
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+
+    &:hover,
+    &:focus-within { --glow-opacity: 0.6; }
+  }
+}
+
+@keyframes aurora-drift-a {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  50%  { transform: translate3d(-6vmax, 5vmax, 0) scale(1.12); }
+  100% { transform: translate3d(-2vmax, 10vmax, 0) scale(0.96); }
+}
+
+@keyframes aurora-drift-b {
+  0%   { transform: translate3d(0, 0, 0) scale(1); }
+  50%  { transform: translate3d(8vmax, -4vmax, 0) scale(1.1); }
+  100% { transform: translate3d(3vmax, -9vmax, 0) scale(1.02); }
+}
+
+@keyframes aurora-spin {
+  to { --aurora-angle: 360deg; }
+}
+
+@keyframes aurora-title {
+  from { background-position: 0% 50%; }
+  to   { background-position: 100% 50%; }
+}
+
+@keyframes aurora-button {
+  0%, 100% { background-position: 0% 50%; }
+  50%      { background-position: 100% 50%; }
+}
+
+@keyframes aurora-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.50); }
+  70%  { box-shadow: 0 0 0 12px rgba(99, 102, 241, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .container .header .title,
+  .container .investigation-container::before,
+  .container .investigation-container::after,
+  .container .investigation-container .investigate-button,
+  .container .investigation-container .investigate-button::after {
+    animation: none !important;
+  }
+}
