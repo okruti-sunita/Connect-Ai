@@ -225,4 +225,137 @@
 
     </changeSet>
 
+    <changeSet id="004-create-agent-conversation" author="connect-ai">
+
+        <createTable tableName="agent_conversation">
+
+            <column name="id" type="${id.type}"
+                    defaultValueComputed="${uuid.function}">
+                <constraints nullable="false"
+                             primaryKey="true"
+                             primaryKeyName="pk_agent_conversation"/>
+            </column>
+
+            <column name="question" type="varchar(2000)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="status" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="answer" type="varchar(8000)"/>
+
+            <column name="grounded" type="boolean">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="fallback_used" type="boolean">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="created_at" type="${date.timestamp.type}">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="completed_at" type="${date.timestamp.type}"/>
+
+        </createTable>
+
+    </changeSet>
+
+    <changeSet id="005-create-agent-execution-step" author="connect-ai">
+
+        <createTable tableName="agent_execution_step">
+
+            <column name="id" type="${id.type}"
+                    defaultValueComputed="${uuid.function}">
+                <constraints nullable="false"
+                             primaryKey="true"
+                             primaryKeyName="pk_agent_execution_step"/>
+            </column>
+
+            <column name="conversation_id" type="${id.type}">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="step_number" type="int">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="tool_name" type="varchar(200)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="status" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+
+        </createTable>
+
+        <addForeignKeyConstraint
+                baseTableName="agent_execution_step"
+                baseColumnNames="conversation_id"
+                referencedTableName="agent_conversation"
+                referencedColumnNames="id"
+                constraintName="fk_agent_step_conversation"
+                onDelete="CASCADE"/>
+
+        <createIndex tableName="agent_execution_step"
+                     indexName="idx_agent_step_conversation">
+            <column name="conversation_id"/>
+        </createIndex>
+
+    </changeSet>
+
+    <changeSet id="006-create-agent-conversation-evidence" author="connect-ai">
+
+        <createTable tableName="agent_conversation_evidence">
+
+            <column name="id" type="${id.type}"
+                    defaultValueComputed="${uuid.function}">
+                <constraints nullable="false"
+                             primaryKey="true"
+                             primaryKeyName="pk_agent_conversation_evidence"/>
+            </column>
+
+            <column name="conversation_id" type="${id.type}">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="citation" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="step_number" type="int">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="server_id" type="${id.type}"/>
+
+            <column name="tool_name" type="varchar(200)">
+                <constraints nullable="false"/>
+            </column>
+
+            <column name="content" type="varchar(4000)">
+                <constraints nullable="false"/>
+            </column>
+
+        </createTable>
+
+        <addForeignKeyConstraint
+                baseTableName="agent_conversation_evidence"
+                baseColumnNames="conversation_id"
+                referencedTableName="agent_conversation"
+                referencedColumnNames="id"
+                constraintName="fk_agent_evidence_conversation"
+                onDelete="CASCADE"/>
+
+        <createIndex tableName="agent_conversation_evidence"
+                     indexName="idx_agent_evidence_conversation">
+            <column name="conversation_id"/>
+        </createIndex>
+
+    </changeSet>
+
 </databaseChangeLog>

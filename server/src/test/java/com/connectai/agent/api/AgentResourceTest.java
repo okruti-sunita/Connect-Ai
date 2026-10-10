@@ -1,6 +1,7 @@
 package com.connectai.agent.api;
 
 import com.connectai.agent.*;
+import com.connectai.agent.persistence.AgentConversationRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -11,7 +12,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
 
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -32,8 +34,27 @@ class AgentResourceTest {
     @MockitoBean
     private GroundedAnswerGenerator answerGenerator;
 
+    @MockitoBean
+    private AgentConversationRepository conversationRepository;
+
+    @MockitoBean
+    private AgentConversationHistoryService historyService;
+
     @Test
     void chatReturnsStableResponseShape() throws Exception {
+        when(conversationRepository.saveAndFlush(any()))
+                .thenAnswer(invocation -> {
+                    var conversation = invocation.getArgument(
+                            0,
+                            com.connectai.agent.persistence.AgentConversation.class
+                    );
+                    conversation.setId(java.util.UUID.randomUUID());
+                    return conversation;
+                });
+
+        when(conversationRepository.save(any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
         AgentExecutionState execution =
                 AgentExecutionState.initial("Why did checkout fail?")
                         .withStatus(AgentExecutionStatus.COMPLETED);
@@ -43,16 +64,13 @@ class AgentResourceTest {
                 List.of(),
                 AgentExecutionStatus.COMPLETED,
                 false,
-                true);
+                true
+        );
 
-        when(toolCatalog.getAvailableTools())
-                .thenReturn(List.of());
-
+        when(toolCatalog.getAvailableTools()).thenReturn(List.of());
         when(executor.execute("Why did checkout fail?", List.of()))
                 .thenReturn(execution);
-
-        when(answerGenerator.generate(execution))
-                .thenReturn(answer);
+        when(answerGenerator.generate(execution)).thenReturn(answer);
 
         mvc.perform(post("/api/agent/chat")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -70,6 +88,9 @@ class AgentResourceTest {
                 .andExpect(jsonPath("$.fallbackUsed").value(true))
                 .andExpect(jsonPath("$.steps").isArray())
                 .andExpect(jsonPath("$.evidence").isArray());
+
+        verify(conversationRepository).saveAndFlush(any());
+        verify(conversationRepository).save(any());
     }
 
     @Test
@@ -88,5 +109,16 @@ class AgentResourceTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void listConversationsReturnsHistory() throws Exception {
+        when(historyService.listLatest()).thenReturn(List.of());
+
+        mvc.perform(get("/api/agent/conversations"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+
+        verify(historyService).listLatest();
     }
 }
