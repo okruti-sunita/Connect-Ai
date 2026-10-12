@@ -1,7 +1,7 @@
 import {useEffect, useState} from "react";
 import {useNavigate} from "react-router-dom";
 import './style/dashboard.scss';
-import {getHealth, type HealthDto} from "../../api/health";
+import {getEfficiency, getHealth, type EfficiencyDto, type HealthDto} from "../../api/health";
 import {toolsApi, type McpServerDto} from "../tools/tools-api";
 import {findCatalogItem} from "../tools/tools-utils";
 import {listInvestigations, STATUS_LABEL} from "../investigations_new/api";
@@ -24,11 +24,12 @@ const DashboardView = () => {
     const [healthError, setHealthError] = useState<string | null>(null);
     const [tools, setTools] = useState<McpServerDto[]>([]);
     const [recent, setRecent] = useState<InvestigationSummary[]>([]);
+    const [efficiency, setEfficiency] = useState<EfficiencyDto | null>(null);
 
     useEffect(() => {
         let alive = true;
         const load = async () => {
-            const [h, t, r] = await Promise.allSettled([getHealth(), toolsApi.list(), listInvestigations({size: 5})]);
+            const [h, t, r, e] = await Promise.allSettled([getHealth(), toolsApi.list(), listInvestigations({size: 5}), getEfficiency()]);
             if (!alive) return;
             if (h.status === 'fulfilled') {
                 setHealth(h.value);
@@ -38,6 +39,7 @@ const DashboardView = () => {
             }
             if (t.status === 'fulfilled') setTools(t.value);
             if (r.status === 'fulfilled') setRecent(r.value);
+            if (e.status === 'fulfilled') setEfficiency(e.value);
         };
         void load();
         // Connections may still be reconnecting right after a backend restart.
@@ -157,6 +159,38 @@ const DashboardView = () => {
                         </button>
                     </div>
                 </div>
+
+                {efficiency && efficiency.completedRuns > 0 && (() => {
+                    const fast = efficiency.routes['FAST_PATH'];
+                    const learned = efficiency.routes['LEARNED'];
+                    const ai = efficiency.routes['AI_AGENT'];
+                    const withoutAi = (fast?.runs ?? 0) + (learned?.runs ?? 0);
+                    return (
+                        <div className="dash-efficiency" aria-label="Hybrid engine efficiency (measured)">
+                            <div className="dash-eff-head">
+                                <span>Hybrid engine · measured on your runs</span>
+                            </div>
+                            <div className="dash-eff-grid">
+                                <div className="dash-eff-card">
+                                    <b>{efficiency.fastPathShare != null ? Math.round(efficiency.fastPathShare * 100) : 0}%</b>
+                                    <span>answered without an AI model call ({withoutAi} of {withoutAi + (ai?.runs ?? 0)})</span>
+                                </div>
+                                <div className="dash-eff-card">
+                                    <b>{fast?.medianSeconds != null ? `${fast.medianSeconds} s` : '—'}</b>
+                                    <span>median fast-path answer{ai?.medianSeconds != null ? ` vs ${ai.medianSeconds} s via AI` : ''}</span>
+                                </div>
+                                <div className="dash-eff-card">
+                                    <b>{efficiency.speedup != null ? `${efficiency.speedup}×` : '—'}</b>
+                                    <span>faster (median fast path vs AI agent)</span>
+                                </div>
+                                <div className="dash-eff-card">
+                                    <b>{efficiency.honestNonAnswers}</b>
+                                    <span>honest "can't fully answer" results instead of guesses</span>
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })()}
 
                 {recent.length > 0 && (
                     <div className="dash-recent">

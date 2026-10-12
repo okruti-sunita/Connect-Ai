@@ -16,3 +16,22 @@ export interface HealthDto {
 }
 
 export const getHealth = () => apiRequest<HealthDto>('/health');
+
+/** Mirrors com.connectai.api.InsightsController.Efficiency (measured, not estimated). */
+export interface RouteStatsDto {
+    runs: number;
+    medianSeconds: number | null;
+    p90Seconds: number | null;
+    answered: number;
+}
+
+export interface EfficiencyDto {
+    completedRuns: number;
+    routes: Record<string, RouteStatsDto>;
+    fastPathShare: number | null;
+    speedup: number | null;
+    outcomes: Record<string, number>;
+    honestNonAnswers: number;
+}
+
+export const getEfficiency = () => apiRequest<EfficiencyDto>('/insights/efficiency');

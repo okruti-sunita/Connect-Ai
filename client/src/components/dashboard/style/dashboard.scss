@@ -776,3 +776,32 @@ body[data-theme="dark"] .container,
     &.in-progress { background: rgba(245, 158, 11, 0.18); color: #d97706; }
   }
 }
+
+.container {
+  .dash-efficiency {
+    margin-top: 18px;
+    border: 1px solid rgba(127, 127, 127, 0.25);
+    border-radius: 10px;
+    padding: 12px 14px 14px;
+  }
+
+  .dash-eff-head { font-weight: 600; font-size: 14px; margin-bottom: 10px; }
+
+  .dash-eff-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 10px;
+  }
+
+  .dash-eff-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: rgba(127, 127, 127, 0.08);
+
+    b { font-size: 24px; line-height: 1.1; }
+    span { font-size: 12px; opacity: 0.8; }
+  }
+}

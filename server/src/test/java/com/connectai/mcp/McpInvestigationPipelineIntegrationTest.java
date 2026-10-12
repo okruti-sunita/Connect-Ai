@@ -311,6 +311,22 @@ class McpInvestigationPipelineIntegrationTest {
                 .allSatisfy(s -> assertThat(s.get("serverName")).isNull());
     }
 
+    @Test
+    @Order(14)
+    @SuppressWarnings("unchecked")
+    void efficiencyIsMeasuredFromStoredRuns() {
+        Map<String, Object> efficiency = get("/api/insights/efficiency").getBody();
+
+        assertThat(((Number) efficiency.get("completedRuns")).longValue()).isPositive();
+        Map<String, Object> routes = (Map<String, Object>) efficiency.get("routes");
+        assertThat(routes).containsKey("FAST_PATH");
+        Map<String, Object> fast = (Map<String, Object>) routes.get("FAST_PATH");
+        assertThat(((Number) fast.get("runs")).longValue()).isPositive();
+        assertThat(fast.get("medianSeconds")).isNotNull();
+        assertThat(((Number) efficiency.get("fastPathShare")).doubleValue()).isBetween(0.0, 1.0);
+        assertThat((Map<String, Object>) efficiency.get("outcomes")).containsKey("ANSWERED");
+    }
+
     /** Close live sessions so the embedded server's graceful shutdown is not held open. */
     @AfterAll
     void closeSessions() {
