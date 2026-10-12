@@ -141,6 +141,22 @@ class FastPathEngineTest {
         assertThat(calls).isEmpty();
     }
 
+    /** Reported case: one connection's token lacked a scope; the answer must show it, not hide it. */
+    @Test
+    void failedConnectionIsListedAndMakesTheAnswerPartial() {
+        var result = engine(request -> {
+            if (request.toolName().equals("search_repositories") && request.serverId().equals(WORK)) {
+                throw new IllegalStateException("Your token has not been granted the required scopes");
+            }
+            return githubResponse(request);
+        }).run("Which repositories do I own?", twoAccounts(), step -> { }, NO_FALLBACK).orElseThrow();
+
+        assertThat(result.answer().coverage()).isEqualTo(GroundedAnswer.Coverage.PARTIAL);
+        assertThat(result.answer().answer()).contains("`awsdemo1`").contains("Not covered by the evidence")
+                .contains("**GitHub - Work**: search_repositories failed").contains("required scopes");
+        assertThat(result.templateAnswer()).isTrue();
+    }
+
     @Test
     void unreadableOutputFallsBackToTheAnswerStep() {
         List<AgentExecutionStep> progress = new ArrayList<>();

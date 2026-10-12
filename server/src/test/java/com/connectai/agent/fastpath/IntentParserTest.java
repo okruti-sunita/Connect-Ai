@@ -25,6 +25,7 @@ class IntentParserTest {
             "closed issues in octo/api | REPO_ISSUES",
             "what is the latest release of octo/api | REPO_LATEST_RELEASE",
             "list releases of octo/api | REPO_RELEASES",
+            "list versions of octo/api | REPO_RELEASES",
             "branches in octo/api | REPO_BRANCHES",
     })
     void recognisesCommonQuestions(String question, Intent expected) {

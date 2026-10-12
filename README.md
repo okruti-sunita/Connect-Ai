@@ -125,6 +125,24 @@ Most questions follow a few patterns, so a deterministic **fast path** answers t
 3. `AnswerTemplates` render the tool's JSON into an exact answer with citations; nothing is paraphrased.
    If the output has an unexpected shape, the regular (AI) answer step writes the answer instead.
 
+**Works with any MCP server, not just GitHub.** When no known-tool recipe applies, a generic layer reads
+the live catalog instead:
+
+- `GenericQuery` classifies the question (identity / list / get one item) and extracts values:
+  `owner/repo`, keys like `PAY-123`, `#42`, quoted search text, `#channel`, state, "last N", "my".
+- `GenericToolMatcher` picks a read-only tool whose *name* matches the entity (with synonyms such as
+  ticket↔issue, PR↔pull request) and fills **required parameters by name** (`owner`, `repo`, `key`, `id`,
+  `number`, `state` via the tool's enum, `limit`/`perPage`/`maxResults`, `channel`, and `assignee`/`user`/
+  `accountId` from the identity call for "my ..."). It refuses, and the AI takes over, when a required value is
+  missing, a requested filter does not exist on the tool, "my" cannot be scoped, or two tools tie.
+- `GenericRenderer` turns any JSON into an exact list or record (title/summary/name/login, key/number/sha,
+  state/status, people, dates; Jira-style `fields.*`; grouped results are flattened).
+- If one connection fails (e.g. a token lacks a scope), the others' results are shown, the failure is listed,
+  and the answer is `PARTIAL`.
+
+Covered by tests with Jira-, Slack- and Linear-shaped catalogs and by an integration test against a real
+in-process MCP server with ticket tools (`GenericMcpServerIntegrationTest`).
+
 Unrecognised questions go to the AI agent. Each investigation records its `route` (`FAST_PATH` / `AI_AGENT`),
 shown in the UI with the time taken. Measured on a laptop CPU with qwen3:1.7b: fast path ~4-7 s (mostly
 GitHub latency) versus ~50-90 s through the model. Disable with `CONNECTAI_FAST_PATH_ENABLED=false`.

@@ -48,11 +48,17 @@ public final class IntentParser {
     private static final Pattern PULL_WORDS = Pattern.compile("\\b(pull requests?|prs?|merge requests?)\\b");
     private static final Pattern COMMIT_WORDS = Pattern.compile("\\b(commits?|changes|changed|history)\\b");
     private static final Pattern ISSUE_WORDS = Pattern.compile("\\b(issues?|bugs?|tickets?)\\b");
-    private static final Pattern RELEASE_WORDS = Pattern.compile("\\b(releases?|versions?|tags?)\\b");
+    // Tags are not releases: "list tags" is served by the generic layer (list_tags), not this recipe.
+    private static final Pattern RELEASE_WORDS = Pattern.compile("\\b(releases?|versions?)\\b");
     private static final Pattern BRANCH_WORDS = Pattern.compile("\\b(branch|branches)\\b");
     private static final Pattern LIMIT = Pattern.compile("\\b(?:last|latest|recent|top|first)\\s+(\\d{1,3})\\b|\\b(\\d{1,3})\\s+(?:latest|recent|last)\\b");
 
     private IntentParser() {
+    }
+
+    /** True when the question needs reasoning, ranking or interpretation (never answered by a template). */
+    public static boolean needsReasoning(String question) {
+        return question == null || NEEDS_REASONING.matcher(question.toLowerCase(Locale.ROOT)).find();
     }
 
     public static Optional<ParsedQuestion> parse(String question) {

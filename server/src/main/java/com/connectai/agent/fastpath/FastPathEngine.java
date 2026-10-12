@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -41,7 +42,8 @@ public class FastPathEngine {
 
     private static final Logger log = LoggerFactory.getLogger(FastPathEngine.class);
 
-    public record Result(AgentExecutionState execution, GroundedAnswer answer, Intent intent, boolean templateAnswer) {
+    /** {@code intent}: the recognised question type, e.g. "MY_REPOS" or "GENERIC_LIST: list tickets". */
+    public record Result(AgentExecutionState execution, GroundedAnswer answer, String intent, boolean templateAnswer) {
     }
 
     /** Writes the answer when a template could not read the tool output. */
@@ -60,16 +62,17 @@ public class FastPathEngine {
 
     public Optional<Result> run(String question, List<McpToolCandidate> tools,
                                 AgentExecutionListener listener, AnswerFallback fallback) {
-        Optional<ParsedQuestion> parsed = IntentParser.parse(question);
-        if (parsed.isEmpty() || tools == null || tools.isEmpty()) {
+        if (tools == null || tools.isEmpty()) {
             return Optional.empty();
+        }
+        // 1. Recipes for well-known tool conventions (e.g. GitHub search qualifiers).
+        Optional<ParsedQuestion> parsed = IntentParser.parse(question);
+        Optional<List<Call>> recipe = parsed.flatMap(intent -> recipe(intent, tools));
+        if (recipe.isEmpty()) {
+            // 2. Generic: match any MCP server's tools by name and schema.
+            return runGeneric(question, tools, listener, fallback);
         }
         ParsedQuestion intent = parsed.get();
-        Optional<List<Call>> recipe = recipe(intent, tools);
-        if (recipe.isEmpty()) {
-            log.info("Fast path recognised {} but the connected tools cannot serve it; using the AI agent", intent.intent());
-            return Optional.empty();
-        }
         log.info("Fast path: intent={}, owner={}, repo={}, state={}, limit={}",
                 intent.intent(), intent.owner(), intent.repo(), intent.state(), intent.limit());
 
@@ -86,13 +89,13 @@ public class FastPathEngine {
 
     /** One planned call. {@code dependsOnLogin}: arguments are built after the identity call on that connection. */
     private record Call(McpToolCandidate tool, Map<String, Object> arguments, String reason, boolean dependsOnLogin,
-                        java.util.function.Function<String, Map<String, Object>> withLogin) {
+                        java.util.function.Function<String, Map<String, Object>> withLogin, boolean loginIsId) {
         static Call fixed(McpToolCandidate tool, Map<String, Object> arguments, String reason) {
-            return new Call(tool, arguments, reason, false, null);
+            return new Call(tool, arguments, reason, false, null, false);
         }
 
         static Call afterLogin(McpToolCandidate tool, java.util.function.Function<String, Map<String, Object>> withLogin, String reason) {
-            return new Call(tool, Map.of(), reason, true, withLogin);
+            return new Call(tool, Map.of(), reason, true, withLogin, false);
         }
     }
 
@@ -161,6 +164,7 @@ public class FastPathEngine {
         final AgentExecutionListener listener;
         AgentExecutionState state;
         final Map<UUID, String> logins = new HashMap<>();
+        final Map<UUID, String> ids = new HashMap<>();
         final Map<Integer, Call> callByStep = new LinkedHashMap<>();
         String failure;
 
@@ -173,7 +177,7 @@ public class FastPathEngine {
         boolean execute(Call call) {
             Map<String, Object> arguments = call.arguments();
             if (call.dependsOnLogin()) {
-                String login = logins.get(call.tool().serverId());
+                String login = call.loginIsId() ? ids.get(call.tool().serverId()) : logins.get(call.tool().serverId());
                 if (login == null) {
                     return true; // identity failed on this connection: its failure is already recorded
                 }
@@ -194,12 +198,128 @@ public class FastPathEngine {
                         + (step.errorMessage() == null ? "" : ": " + step.errorMessage());
                 return true; // other connections still run; calls needing this one's login are skipped
             }
-            if (call.tool().toolName().equals("get_me")) {
-                rootJson(step).map(me -> AnswerTemplates.text(me, "login", "username"))
-                        .ifPresent(login -> logins.put(call.tool().serverId(), login));
+            if (GenericToolMatcher.isIdentityTool(call.tool())) {
+                rootJson(step).ifPresent(me -> {
+                    String login = AnswerTemplates.text(me, "login", "username", "user.login", "name", "emailAddress", "email");
+                    String id = AnswerTemplates.text(me, "accountId", "user_id", "id");
+                    if (login != null) logins.put(call.tool().serverId(), login);
+                    if (id != null) ids.put(call.tool().serverId(), id);
+                });
             }
             return true;
         }
+    }
+
+    // ---------------------------------------------------------------- generic (any MCP server)
+
+    private Optional<Result> runGeneric(String question, List<McpToolCandidate> tools,
+                                        AgentExecutionListener listener, AnswerFallback fallback) {
+        Optional<GenericQuery> parsed = GenericQuery.parse(question);
+        if (parsed.isEmpty()) {
+            return Optional.empty();
+        }
+        GenericQuery query = parsed.get();
+        List<Call> calls = new ArrayList<>();
+        String label;
+
+        if (query.kind() == GenericQuery.Kind.IDENTITY) {
+            List<McpToolCandidate> identities = GenericToolMatcher.identityTools(tools);
+            if (identities.isEmpty()) return Optional.empty();
+            identities.forEach(me -> calls.add(Call.fixed(me, Map.of(), "Identity of the account on " + label(me) + ".")));
+            label = "GENERIC_IDENTITY";
+        } else {
+            Optional<GenericToolMatcher.Match> match = GenericToolMatcher.match(query, tools);
+            if (match.isEmpty()) {
+                log.info("Generic fast path: no tool clearly matches {} {}; using the AI agent", query.kind(), query.entityWords());
+                return Optional.empty();
+            }
+            GenericToolMatcher.Match m = match.get();
+            label = "GENERIC_" + query.kind() + ": " + m.tool().toolName();
+            String reason = (query.kind() == GenericQuery.Kind.GET ? "Read " : "List ") + m.entityLabel()
+                    + " with " + m.tool().toolName() + ".";
+            if (m.loginParameter() != null) {
+                // "my ...": run on every connection that has the tool and an identity tool, scoped to its own user.
+                List<McpToolCandidate> identities = GenericToolMatcher.identityTools(tools);
+                for (McpToolCandidate tool : tools) {
+                    if (!tool.toolName().equals(m.tool().toolName())) continue;
+                    identities.stream().filter(me -> me.serverId().equals(tool.serverId())).findFirst().ifPresent(me -> {
+                        calls.add(Call.fixed(me, Map.of(), "Identity on " + label(me) + ", to scope the call."));
+                        calls.add(new Call(tool, Map.of(), reason, true, login -> {
+                            Map<String, Object> args = new LinkedHashMap<>(m.arguments());
+                            args.put(m.loginParameter(), login);
+                            return args;
+                        }, m.loginIsId()));
+                    });
+                }
+                if (calls.isEmpty()) return Optional.empty();
+            } else {
+                calls.add(Call.fixed(m.tool(), m.arguments(), reason));
+            }
+        }
+
+        log.info("Generic fast path: {} ({} call(s))", label, calls.size());
+        Run run = new Run(question, listener);
+        calls.forEach(run::execute);
+        return Optional.of(finishGeneric(query, label, run, fallback));
+    }
+
+    private Result finishGeneric(GenericQuery query, String label, Run run, AnswerFallback fallback) {
+        AgentExecutionState execution = run.state.finish(
+                run.failure == null || run.state.hasSuccessfulStep() ? AgentExecutionStatus.COMPLETED : AgentExecutionStatus.FAILED,
+                run.failure == null
+                        ? "Answered by the fast path (" + label + "): " + run.state.stepCount() + " tool call(s), no AI model call."
+                        : "Fast path (" + label + "): " + run.failure);
+        GroundedAnswerContext context = contextBuilder.build(execution);
+        Map<Integer, String> citations = new HashMap<>();
+        context.evidence().forEach(e -> citations.put(e.stepNumber(), e.citation()));
+
+        List<String> sections = new ArrayList<>();
+        boolean several = run.callByStep.values().stream().map(c -> c.tool().serverId()).distinct().count() > 1;
+        boolean ok = true; // failed calls are listed by templateAnswer(), they do not force the AI fallback
+        for (AgentExecutionStep step : execution.steps()) {
+            Call call = run.callByStep.get(step.stepNumber());
+            String citation = citations.get(step.stepNumber());
+            boolean identityStep = GenericToolMatcher.isIdentityTool(call.tool());
+            if (step.status() != AgentStepStatus.SUCCESS || citation == null
+                    || (identityStep && query.kind() != GenericQuery.Kind.IDENTITY)) {
+                continue;
+            }
+            Optional<String> section = rootJson(step).flatMap(root -> switch (query.kind()) {
+                case IDENTITY -> GenericRenderer.identity(root, citation);
+                case GET -> GenericRenderer.single(root, singularLabel(call), citation);
+                case LIST -> GenericRenderer.list(root, entityLabel(call), scope(query, run, call), citation);
+            });
+            if (section.isEmpty()) {
+                ok = false;
+                break;
+            }
+            sections.add((several ? "**" + label(call.tool()) + "**: " : "") + section.get());
+        }
+        if (!ok || sections.isEmpty()) {
+            return new Result(execution, fallback.generate(execution), label, false);
+        }
+        return new Result(execution, templateAnswer(sections, run, execution, context), label, true);
+    }
+
+    private static String entityLabel(Call call) {
+        List<String> tokens = GenericToolMatcher.nameTokens(call.tool().toolName()).stream()
+                .filter(t -> !Set.of("list", "search", "get", "find", "query", "fetch", "read", "browse").contains(t)).toList();
+        return tokens.isEmpty() ? "results" : String.join(" ", tokens);
+    }
+
+    private static String singularLabel(Call call) {
+        List<String> tokens = GenericToolMatcher.nameTokens(call.tool().toolName()).stream()
+                .filter(t -> !Set.of("get", "read", "view", "fetch", "show", "describe", "lookup").contains(t)).toList();
+        return tokens.isEmpty() ? "item" : String.join(" ", tokens);
+    }
+
+    private static String scope(GenericQuery query, Run run, Call call) {
+        if (query.owner() != null) return "in `" + query.owner() + "/" + query.repo() + "`";
+        if (query.channel() != null) return "in #" + query.channel();
+        if (call.dependsOnLogin() && run.logins.containsKey(call.tool().serverId())) {
+            return "for **" + run.logins.get(call.tool().serverId()) + "**";
+        }
+        return null;
     }
 
     private Result finish(ParsedQuestion q, Run run, AnswerFallback fallback) {
@@ -217,15 +337,33 @@ public class FastPathEngine {
         }
 
         Optional<String> text = render(q, run, execution, citations);
-        if (text.isEmpty() || run.failure != null) {
-            // A template could not read the output, or a step failed: the regular answer step decides,
+        if (text.isEmpty()) {
+            // A template could not read the output (or nothing succeeded): the regular answer step decides,
             // and its own checks (coverage, citations, claim check) apply.
             GroundedAnswer answer = fallback.generate(execution);
-            return new Result(execution, answer, q.intent(), false);
+            return new Result(execution, answer, q.intent().name(), false);
         }
-        GroundedAnswer answer = new GroundedAnswer(text.get(), context.evidence(), execution.status(),
-                true, false, GroundedAnswer.Coverage.FULL);
-        return new Result(execution, answer, q.intent(), true);
+        return new Result(execution, templateAnswer(List.of(text.get()), run, execution, context), q.intent().name(), true);
+    }
+
+    /**
+     * Template answer from the successful calls. Failed calls (e.g. one connection's token lacks a
+     * scope) are listed, not hidden, and make the answer PARTIAL.
+     */
+    private static GroundedAnswer templateAnswer(List<String> sections, Run run, AgentExecutionState execution,
+                                                 GroundedAnswerContext context) {
+        List<String> failures = new ArrayList<>();
+        for (AgentExecutionStep step : execution.steps()) {
+            if (step.status() != AgentStepStatus.SUCCESS) {
+                Call call = run.callByStep.get(step.stepNumber());
+                failures.add("**" + (call == null ? "A connection" : label(call.tool())) + "**: " + step.plan().toolName()
+                        + " failed" + (step.errorMessage() == null ? "." : " — " + step.errorMessage()));
+            }
+        }
+        String text = String.join("\n\n", sections)
+                + (failures.isEmpty() ? "" : "\n\nNot covered by the evidence:\n- " + String.join("\n- ", failures));
+        return new GroundedAnswer(text, context.evidence(), execution.status(), true, false,
+                failures.isEmpty() ? GroundedAnswer.Coverage.FULL : GroundedAnswer.Coverage.PARTIAL);
     }
 
     private Optional<String> render(ParsedQuestion q, Run run, AgentExecutionState execution, Map<Integer, String> citations) {
