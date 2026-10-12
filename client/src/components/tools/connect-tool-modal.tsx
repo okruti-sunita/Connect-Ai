@@ -89,7 +89,8 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
         };
     }, [item.oauthProvider, form]);
     const useOAuth = !isCustom && !!item.oauthProvider && oauthReady === true && (watchedMethod ?? 'oauth') === 'oauth';
-    const authType: RegisterToolPayload['authType'] = isCustom ? (watchedAuth ?? 'NONE') : useOAuth ? 'OAUTH' : 'BEARER';
+    const authType: RegisterToolPayload['authType'] = isCustom ? (watchedAuth ?? 'NONE')
+        : item.localServerHelp ? 'NONE' : useOAuth ? 'OAUTH' : 'BEARER';
     const stages = authType === 'OAUTH' ? oauthStages(item.name) : TOKEN_STAGES;
     const endpoint = Form.useWatch('endpoint', form);
     const usingManagedAddress = !isCustom && !!item.endpoint && endpoint === item.endpoint;
@@ -204,7 +205,7 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                                 connectionName: uniqueConnectionName(item.defaultConnectionName, existingNames),
                                 deployment: item.deployments?.[0]?.id,
                                 endpoint: initialEndpoint,
-                                authType: isCustom ? 'NONE' : 'BEARER',
+                                authType: isCustom || item.localServerHelp ? 'NONE' : 'BEARER',
                                 authMethod: item.oauthProvider ? 'oauth' : 'token',
                             }}
                         >
@@ -282,6 +283,10 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                                         ]}
                                     />
                                 </Form.Item>
+                            )}
+
+                            {!isCustom && item.localServerHelp && (
+                                <p className="secure-note">{item.localServerHelp}</p>
                             )}
 
                             {authType === 'BEARER' && (

@@ -262,12 +262,12 @@ public final class GenericToolMatcher {
     }
 
     @SuppressWarnings("unchecked")
-    static List<String> required(McpToolCandidate tool) {
+    public static List<String> required(McpToolCandidate tool) {
         return tool.inputSchema().get("required") instanceof List<?> list
                 ? list.stream().map(String::valueOf).toList() : List.of();
     }
 
-    static List<String> nameTokens(String name) {
+    public static List<String> nameTokens(String name) {
         String spaced = name.replaceAll("([a-z0-9])([A-Z])", "$1_$2").toLowerCase(Locale.ROOT);
         List<String> tokens = new ArrayList<>();
         for (String token : spaced.split("[^a-z0-9]+")) {

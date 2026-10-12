@@ -62,6 +62,14 @@ public class AgentExecutionConfig {
         return new FastPathEngine(executor, contextBuilder);
     }
 
+    /** Cross-tool issue analysis (tracker issue -> suspect code changes + time to resolve), no model call. */
+    @Bean
+    @ConditionalOnProperty(name = "connectai.agent.issue-analysis.enabled", havingValue = "true", matchIfMissing = true)
+    public com.connectai.agent.analysis.IssueAnalysisEngine issueAnalysisEngine(
+            PlannedToolExecutor executor, GroundedAnswerContextBuilder contextBuilder) {
+        return new com.connectai.agent.analysis.IssueAnalysisEngine(executor, contextBuilder);
+    }
+
     @Bean
     public PlannedToolExecutor plannedToolExecutor(
             ToolExecutionPort toolExecutionPort) {

@@ -8,6 +8,7 @@ import com.connectai.agent.GroundedAnswer;
 import com.connectai.agent.GroundedAnswerGenerator;
 import com.connectai.agent.McpToolCandidate;
 import com.connectai.agent.ToolShortlister;
+import com.connectai.agent.analysis.IssueAnalysisEngine;
 import com.connectai.agent.fastpath.FastPathEngine;
 import com.connectai.mcp.entity.EMcpServer;
 import com.connectai.mcp.repository.McpServerRepository;
@@ -42,6 +43,7 @@ public class InvestigationRunner {
     private final McpServerRepository servers;
     private final FastPathEngine fastPath;
     private final LearnedRecipeService learned;
+    private final IssueAnalysisEngine analysis;
 
     public InvestigationRunner(
             AgentToolCatalog toolCatalog,
@@ -50,7 +52,8 @@ public class InvestigationRunner {
             InvestigationStore store,
             McpServerRepository servers,
             ObjectProvider<FastPathEngine> fastPath,
-            ObjectProvider<LearnedRecipeService> learned) {
+            ObjectProvider<LearnedRecipeService> learned,
+            ObjectProvider<IssueAnalysisEngine> analysis) {
         this.toolCatalog = toolCatalog;
         this.executor = executor;
         this.answerGenerator = answerGenerator;
@@ -58,6 +61,7 @@ public class InvestigationRunner {
         this.servers = servers;
         this.fastPath = fastPath.getIfAvailable();
         this.learned = learned.getIfAvailable();
+        this.analysis = analysis.getIfAvailable();
     }
 
     public void run(UUID investigationId, String question) {
@@ -71,10 +75,23 @@ public class InvestigationRunner {
             // Hybrid routing: recognised questions are answered by a deterministic recipe with no model
             // call; everything else goes to the AI agent.
             String routeDetail = "Fast path disabled; the AI agent plans every question.";
+            String analysisNote = "";
+            // Issue analysis: "why is PAY-12 happening / estimate PAY-12" -> tracker + code evidence, scored.
+            if (analysis != null && IssueAnalysisEngine.issueKey(question).isPresent()) {
+                var decision = analysis.analyze(question, tools, step -> store.appendStep(investigationId, step));
+                if (decision.result().isPresent()) {
+                    var r = decision.result().get();
+                    store.complete(investigationId, r.execution(), r.answer(), connections, "ANALYSIS", r.explanation());
+                    log.info("Investigation answered by issue analysis: id={}, elapsedMs={}",
+                            investigationId, (System.nanoTime() - started) / 1_000_000);
+                    return;
+                }
+                analysisNote = decision.explanation() + " ";
+            }
             if (fastPath != null) {
                 var decision = fastPath.decide(question, tools, step -> store.appendStep(investigationId, step),
                         execution -> answerGenerator.generate(execution, new AnswerHints(List.of(), connections)));
-                routeDetail = decision.explanation();
+                routeDetail = analysisNote + decision.explanation();
                 var fast = decision.result();
                 if (fast.isPresent()) {
                     store.complete(investigationId, fast.get().execution(), fast.get().answer(), connections,

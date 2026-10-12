@@ -33,6 +33,8 @@ export interface CatalogItem {
     tokenHelp: string;
     /** OAuth provider id (server config connectai.oauth.providers) when "Sign in with ..." is offered. */
     oauthProvider?: string;
+    /** Set when the MCP server runs on the user's machine and holds its own credentials: no token field. */
+    localServerHelp?: string;
 }
 
 type EntryInput = Pick<CatalogItem, 'id' | 'name' | 'badge' | 'color' | 'category' | 'blurb' | 'canDo' | 'requires'> &
@@ -69,6 +71,10 @@ export const CATALOG: CatalogItem[] = [
     entry({
         id: 'jira', name: 'Jira', badge: 'JI', color: '#2864dc', category: 'Tickets',
         blurb: 'Find tickets, bugs and sprint history.',
+        // Local mcp-atlassian server (read-only); the Jira email + API token live in its own .env file.
+        endpoint: 'http://localhost:9000/mcp',
+        localServerHelp: 'Connects to the local Jira MCP server (mcp-atlassian, read-only). Your Jira email and API token '
+            + 'stay in its .env file on this machine; Connect AI never sees them.',
         canDo: ['Find tickets by keyword or status', 'Read ticket details and comments', 'See sprint and project history'],
         requires: ['Read access to your projects'],
     }),

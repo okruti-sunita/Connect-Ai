@@ -32,7 +32,7 @@ public final class AnswerTemplates {
     }
 
     /** The list of records in a tool result: a root array, or the first array field (items, issues, ...). */
-    static Optional<JsonNode> records(JsonNode root) {
+    public static Optional<JsonNode> records(JsonNode root) {
         if (root.isArray()) return Optional.of(root);
         for (String key : List.of("items", "issues", "pull_requests", "pullRequests", "commits", "releases",
                 "branches", "nodes", "repositories", "data")) {

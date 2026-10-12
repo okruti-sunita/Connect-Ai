@@ -32,6 +32,10 @@ const ROUTE_BADGE: Record<string, { css: string; label: string; title: string; s
         css: 'learned', label: '♻ Learned recipe', suffix: ' · planner skipped',
         title: "Same question shape as an earlier answered run: its tool plan was replayed with the new question's values, and one model call wrote the answer.",
     },
+    ANALYSIS: {
+        css: 'analysis', label: '🔬 Issue analysis', suffix: ' · no AI model call',
+        title: 'Read the issue from the tracker, searched the code host for changes behind it, scored suspects by evidence and estimated time to resolve from resolved history.',
+    },
     AI_AGENT: {css: 'ai', label: '🧠 AI agent', title: 'Planned and answered by the AI agent.'},
 };
 

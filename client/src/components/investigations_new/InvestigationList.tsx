@@ -128,6 +128,7 @@ const InvestigationList = ({ items, loading, loadError, starting, startError, on
                         <span className="inv-title">
                             {i.route === 'FAST_PATH' && <span className="route-mini" title="Fast path: no AI model call">⚡</span>}
                             {i.route === 'LEARNED' && <span className="route-mini" title="Learned recipe: planner skipped">♻</span>}
+                            {i.route === 'ANALYSIS' && <span className="route-mini" title="Issue analysis: no AI model call">🔬</span>}
                             {i.title}
                         </span>
                         <span className="inv-sources">
