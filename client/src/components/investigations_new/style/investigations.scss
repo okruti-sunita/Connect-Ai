@@ -743,3 +743,85 @@ $muted: #64748b;
     opacity: .35;
   }
 }
+
+/* ---------- real execution states (added with the async investigation flow) ---------- */
+.inv-page {
+  .inv-status {
+    &.failed { color: #dc2626; }
+    &.partial { color: #2563eb; }
+    &.inconclusive { color: #6b7280; }
+  }
+
+  .status-pill {
+    &.failed { background: #fee2e2; color: #b91c1c; }
+    &.partial { background: #dbeafe; color: #1d4ed8; }
+    &.inconclusive { background: #f3f4f6; color: #374151; }
+  }
+
+  .inv-start-error { margin-top: 10px; }
+
+  .inv-hint { font-size: 12px; color: #94a3b8; }
+
+  .run-steps {
+    .step-block { display: flex; flex-direction: column; gap: 2px; }
+    .step-meta { color: #94a3b8; font-size: 12px; }
+    .step-detail {
+      margin-left: 19px;
+      font-size: 12px;
+      color: #cbd5e1;
+      overflow-wrap: anywhere;
+
+      &.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      &.error { color: #fca5a5; }
+    }
+    .dot.failed { background: #ef4444; }
+  }
+
+  .run-summary {
+    .answer-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+    .stop-reason { font-size: 13px; color: #64748b; }
+    &.failed { border-left: 3px solid #ef4444; }
+    &.inconclusive { border-left: 3px solid #9ca3af; }
+    &.partial { border-left: 3px solid #3b82f6; }
+  }
+
+  .evidence-snippet {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .inv-empty-note { color: #64748b; font-size: 14px; }
+}
+
+.evidence-drawer .evidence-raw {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.inv-page {
+  .inv-examples {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
+
+  .inv-example {
+    border: 1px solid rgba(127, 127, 127, 0.35);
+    background: rgba(127, 127, 127, 0.08);
+    color: inherit;
+    border-radius: 999px;
+    padding: 4px 12px;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+
+    &:hover:not(:disabled) { background: rgba(127, 127, 127, 0.16); }
+  }
+}

@@ -1,6 +1,8 @@
-# OPTIONAL - not used while the app runs on H2.
-# A local PostgreSQL for when you switch (see application.yml).
+# Local PostgreSQL for the backend (see server/src/main/resources/application.yml).
 # Start: docker compose up -d      Stop: docker compose down
+# If port 5432 is already taken by another PostgreSQL, publish on another port:
+#   CONNECTAI_PG_PORT=5433 docker compose up -d
+# and start the backend with DB_URL=jdbc:postgresql://localhost:5433/connect
 # The image is PostgreSQL with the pgvector extension pre-installed (needed in Phase 3).
 services:
   postgres:
@@ -11,7 +13,7 @@ services:
       POSTGRES_USER: connect
       POSTGRES_PASSWORD: connect
     ports:
-      - "5432:5432"
+      - "${CONNECTAI_PG_PORT:-5432}:5432"
     volumes:
       - connectai-pgdata:/var/lib/postgresql/data
 

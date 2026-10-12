@@ -1,0 +1,13 @@
+# Copy this file to server/config/application.yml (git-ignored) and fill in your own values.
+# Spring Boot loads ./config/application.yml from the backend's working directory automatically.
+connectai:
+  security:
+    # Encrypts stored MCP tokens. Changing it later makes stored tokens unreadable.
+    encryption-key: "<generate-a-long-random-string>"
+  oauth:
+    providers:
+      github:
+        # GitHub -> Settings -> Developer settings -> OAuth Apps -> New OAuth App
+        # Authorization callback URL: http://localhost:8080/connect-ai/api/oauth/callback
+        client-id: "<your-oauth-app-client-id>"
+        client-secret: "<your-oauth-app-client-secret>"

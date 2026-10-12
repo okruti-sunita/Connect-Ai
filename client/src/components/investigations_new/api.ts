@@ -1,14 +1,16 @@
 /*
  * ---------------------------------------------------------------
  * Investigations API layer: the ONLY file that talks to
- * /api/investigations. Components call these three functions and
+ * /api/investigations. Components call these functions and
  * never use fetch directly.
  *
  * The server speaks UPPER_CASE (ANSWERED, GITHUB, confidence 0-1).
  * This file converts that to what the screens use (resolved,
- * github, confidence 0-100) so the components stay unchanged.
+ * github, confidence 0-100). Nothing here invents data: steps,
+ * evidence and answers are exactly what the backend persisted.
  * ---------------------------------------------------------------
  */
+import { apiRequest } from "../../api/http";
 import type {
     EvidenceCategory,
     EvidenceItem,
@@ -19,13 +21,10 @@ import type {
     ToolSource
 } from "./types";
 
-const API_BASE = (
-    (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "http://localhost:8080/connect-ai/api"
-).replace(/\/+$/, "");
-const BASE = `${API_BASE}/investigations`;
+const BASE = "/investigations";
 
 /* ---- Shapes returned by the server (InvestigationSummary / InvestigationResponse in the Java code) ---- */
-type ApiStatus = "RUNNING" | "ANSWERED" | "FAILED";
+type ApiStatus = "RUNNING" | "ANSWERED" | "PARTIAL" | "INCONCLUSIVE" | "FAILED";
 
 interface ApiSummary {
     id: string;
@@ -53,6 +52,22 @@ interface ApiEvidence {
     summary: string;
     confidenceScore: number | null;
     fetchedAt: string;
+    stepNumber: number | null;
+    toolName: string | null;
+    serverId: string | null;
+    serverName: string | null;
+}
+
+interface ApiStep {
+    stepNumber: number;
+    toolName: string;
+    status: "SUCCESS" | "FAILED";
+    serverId: string | null;
+    serverName: string | null;
+    argumentsJson: string | null;
+    reason: string | null;
+    errorMessage: string | null;
+    durationMs: number | null;
 }
 
 interface ApiInvestigation {
@@ -62,9 +77,11 @@ interface ApiInvestigation {
     status: ApiStatus;
     archived: boolean;
     resolvedAnswer: string | null;
+    stopReason: string | null;
     createdAt: string;
+    completedAt: string | null;
     evidence: ApiEvidence[];
-    steps?: { stepNumber: number; toolName: string; status: "SUCCESS" | "FAILED" | string }[];
+    steps: ApiStep[];
 }
 
 /* ---- Conversions ---- */
@@ -87,13 +104,27 @@ const CATEGORY_BY_SOURCE: Record<ToolSource, EvidenceCategory> = {
     mcp: "Other"
 };
 
-const toSource = (raw: string): ToolSource | null => SOURCE_BY_API[raw] ?? null;
+/* Unknown source types are shown as generic MCP evidence rather than dropped. */
+const toSource = (raw: string): ToolSource => SOURCE_BY_API[raw] ?? "mcp";
 
-const toStatus = (status: ApiStatus, archived: boolean): InvestigationStatus => {
+export const toStatus = (status: ApiStatus, archived: boolean): InvestigationStatus => {
     if (archived) return "archived";
-    if (status === "ANSWERED") return "resolved";
-    if (status === "FAILED") return "failed";
-    return "in-progress";
+    switch (status) {
+        case "ANSWERED": return "resolved";
+        case "PARTIAL": return "partial";
+        case "INCONCLUSIVE": return "inconclusive";
+        case "FAILED": return "failed";
+        default: return "in-progress";
+    }
+};
+
+export const STATUS_LABEL: Record<InvestigationStatus, string> = {
+    resolved: "Answered",
+    partial: "Partial",
+    inconclusive: "Inconclusive",
+    "in-progress": "Running",
+    failed: "Failed",
+    archived: "Archived"
 };
 
 export const timeAgo = (iso: string, now: number = Date.now()): string => {
@@ -110,9 +141,7 @@ export const timeAgo = (iso: string, now: number = Date.now()): string => {
     return new Date(then).toLocaleDateString();
 };
 
-const uniqueSources = (raw: string[]): ToolSource[] => [
-    ...new Set(raw.map(toSource).filter((s): s is ToolSource => s !== null))
-];
+const uniqueSources = (raw: string[]): ToolSource[] => [...new Set(raw.map(toSource))];
 
 const toSummary = (s: ApiSummary): InvestigationSummary => ({
     id: s.id,
@@ -122,45 +151,34 @@ const toSummary = (s: ApiSummary): InvestigationSummary => ({
     updatedAgo: timeAgo(s.createdAt)
 });
 
-const toEvidence = (e: ApiEvidence): EvidenceItem | null => {
+const toEvidence = (e: ApiEvidence): EvidenceItem => {
     const source = toSource(e.sourceType);
-    if (!source) return null; // Ignore unknown source types, but preserve generic MCP evidence.
     return {
         id: e.id,
         source,
         category: CATEGORY_BY_SOURCE[source],
         title: e.sourceRef,
         snippet: e.summary,
-        confidence: Math.round((e.confidenceScore ?? 0) * 100),
-        when: timeAgo(e.fetchedAt)
+        confidence: e.confidenceScore == null ? null : Math.round(e.confidenceScore * 100),
+        when: timeAgo(e.fetchedAt),
+        toolName: e.toolName,
+        serverName: e.serverId ? e.serverName ?? "removed connection" : null,
+        stepNumber: e.stepNumber
     };
 };
 
-/* Render only execution records persisted by the backend; never infer steps from evidence. */
-const stepsFrom = (raw: NonNullable<ApiInvestigation["steps"]>): InvestigationStep[] =>
-    raw.map((step) => {
-        const name = (step.toolName ?? "").toLowerCase();
-        const source: ToolSource = name.includes("github") ? "github"
-            : name.includes("slack") ? "slack"
-            : name.includes("jira") ? "jira"
-            : name.includes("splunk") ? "splunk"
-            : name.includes("grafana") ? "grafana"
-            : name.includes("kafka") || name.includes("queue") ? "kafka" : "mcp";
-        return {
-            id: `${step.stepNumber}-${step.toolName}`,
-            source,
-            text: `${step.toolName} — ${step.status}`
-        };
-    });
-
-const request = async <T>(url: string, init?: RequestInit): Promise<T> => {
-    const res = await fetch(url, {
-        ...init,
-        headers: { Accept: "application/json", ...(init?.body ? { "Content-Type": "application/json" } : {}) }
-    });
-    if (!res.ok) throw new Error(`API failed with status: ${res.status}`);
-    return res.json() as Promise<T>;
-};
+const toStep = (step: ApiStep, source: ToolSource): InvestigationStep => ({
+    id: `${step.stepNumber}-${step.toolName}`,
+    stepNumber: step.stepNumber,
+    source,
+    toolName: step.toolName,
+    serverName: step.serverId ? step.serverName ?? "removed connection" : null,
+    status: step.status,
+    argumentsJson: step.argumentsJson,
+    reason: step.reason,
+    errorMessage: step.errorMessage,
+    durationMs: step.durationMs
+});
 
 /* ---- Public API used by the components ---- */
 export interface ListQuery {
@@ -170,39 +188,37 @@ export interface ListQuery {
     size?: number; // the server caps this at 50
 }
 
+const STATUS_FILTER: Partial<Record<InvestigationStatus, ApiStatus>> = {
+    resolved: "ANSWERED",
+    partial: "PARTIAL",
+    inconclusive: "INCONCLUSIVE",
+    "in-progress": "RUNNING",
+    failed: "FAILED"
+};
+
 /* GET /api/investigations */
 export const listInvestigations = async (query: ListQuery = {}): Promise<InvestigationSummary[]> => {
     const params = new URLSearchParams();
-    switch (query.status) {
-        case "resolved":
-            params.set("status", "ANSWERED");
-            params.set("archived", "false");
-            break;
-        case "in-progress":
-            params.set("status", "RUNNING");
-            params.set("archived", "false");
-            break;
-        case "failed":
-            params.set("status", "FAILED");
-            params.set("archived", "false");
-            break;
-        case "archived":
-            params.set("archived", "true");
-            break;
-        default:
-            break; // "all": no filter
+    if (query.status === "archived") {
+        params.set("archived", "true");
+    } else if (query.status && query.status !== "all") {
+        params.set("status", STATUS_FILTER[query.status] ?? "RUNNING");
+        params.set("archived", "false");
     }
     if (query.q?.trim()) params.set("q", query.q.trim());
     params.set("page", String(query.page ?? 0));
     params.set("size", String(query.size ?? 20));
 
-    const page = await request<ApiPage<ApiSummary>>(`${BASE}?${params.toString()}`);
+    const page = await apiRequest<ApiPage<ApiSummary>>(`${BASE}?${params.toString()}`);
     return page.items.map(toSummary);
 };
 
-/* POST /api/investigations   body: { question }   (the server runs the agent and returns the finished run) */
+/*
+ * POST /api/investigations   body: { question }
+ * Returns immediately with the persisted record (normally RUNNING); poll getInvestigation for progress.
+ */
 export const startInvestigation = async (question: string): Promise<InvestigationSummary> => {
-    const res = await request<ApiInvestigation>(BASE, { method: "POST", body: JSON.stringify({ question }) });
+    const res = await apiRequest<ApiInvestigation>(BASE, "POST", { question });
     return {
         id: res.id,
         title: res.title,
@@ -214,25 +230,27 @@ export const startInvestigation = async (question: string): Promise<Investigatio
 
 /* GET /api/investigations/{id} */
 export const getInvestigation = async (id: string): Promise<InvestigationDetailData> => {
-    const res = await request<ApiInvestigation>(`${BASE}/${encodeURIComponent(id)}`);
-    const evidence = res.evidence
-        .map(toEvidence)
-        .filter((e): e is EvidenceItem => e !== null)
-        .sort((a, b) => b.confidence - a.confidence);
+    const res = await apiRequest<ApiInvestigation>(`${BASE}/${encodeURIComponent(id)}`);
+    const evidence = res.evidence.map(toEvidence);
+    const sourceByStep = new Map<number, ToolSource>();
+    evidence.forEach((e) => { if (e.stepNumber != null) sourceByStep.set(e.stepNumber, e.source); });
 
     return {
         id: res.id,
         title: res.title,
+        question: res.question,
         status: toStatus(res.status, res.archived),
         startedAgo: timeAgo(res.createdAt),
+        completedAgo: res.completedAt ? timeAgo(res.completedAt) : null,
+        stopReason: res.stopReason,
         tags: [], // entity extraction (ticket keys, PR numbers) comes with a later server step
-        steps: stepsFrom(res.steps ?? []),
+        steps: (res.steps ?? []).map((s) => toStep(s, sourceByStep.get(s.stepNumber) ?? "mcp")),
         evidence,
         summary: {
-            // A failed run stores the raw error text; never show that to users.
-            text: res.status === "FAILED" ? "This investigation could not be completed." : (res.resolvedAnswer ?? ""),
-            keyEvidence: evidence.slice(0, 3).map((e) => ({ source: e.source, label: e.title })),
-            nextSteps: [] // structured next steps come with the LLM summary step
+            // ANSWERED/PARTIAL: grounded answer. INCONCLUSIVE/FAILED: the honest explanation of what went wrong.
+            text: res.resolvedAnswer ?? "",
+            keyEvidence: evidence.slice(0, 3).map((e) => ({ source: e.source, label: e.toolName ? `${e.title} · ${e.toolName}` : e.title })),
+            nextSteps: []
         }
     };
 };

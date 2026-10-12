@@ -9,13 +9,19 @@ import java.util.UUID;
  *
  * The planner needs to know what a tool can do, but it must not know about
  * MCP SDK classes, JSON-RPC, HTTP, sessions, or transports.
+ *
+ * {@code readOnlyHint} is the server's MCP annotation (null when the server does not say).
+ * {@code serverName} is the user's label for the connection ("GitHub - Work"); several
+ * connections can expose identically named tools, so the planner shows it next to each tool.
  */
 public record McpToolCandidate(
         UUID serverId,
         String toolName,
         String title,
         String description,
-        Map<String, Object> inputSchema
+        Map<String, Object> inputSchema,
+        Boolean readOnlyHint,
+        String serverName
 ) {
 
     public McpToolCandidate {
@@ -29,6 +35,26 @@ public record McpToolCandidate(
         title = title == null ? "" : title;
         description = description == null ? "" : description;
         inputSchema = inputSchema == null ? Map.of() : Map.copyOf(inputSchema);
+        serverName = serverName == null ? "" : serverName;
+    }
+
+    public McpToolCandidate(
+            UUID serverId,
+            String toolName,
+            String title,
+            String description,
+            Map<String, Object> inputSchema,
+            Boolean readOnlyHint) {
+        this(serverId, toolName, title, description, inputSchema, readOnlyHint, null);
+    }
+
+    public McpToolCandidate(
+            UUID serverId,
+            String toolName,
+            String title,
+            String description,
+            Map<String, Object> inputSchema) {
+        this(serverId, toolName, title, description, inputSchema, null, null);
     }
 
     /**

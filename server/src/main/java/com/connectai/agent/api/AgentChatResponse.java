@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.UUID;
 
 public record AgentChatResponse(UUID id, AgentExecutionStatus status, String question, String answer,
-                                boolean grounded, boolean fallbackUsed,
+                                boolean grounded, boolean fallbackUsed, String stopReason,
                                 List<AgentChatStepResponse> steps, List<GroundedEvidenceResponse> evidence) {
     public AgentChatResponse {
         steps = steps == null ? List.of() : List.copyOf(steps);
@@ -16,8 +16,8 @@ public record AgentChatResponse(UUID id, AgentExecutionStatus status, String que
 
     public static AgentChatResponse from(UUID id, String question, AgentExecutionState execution, GroundedAnswer answer) {
         List<AgentChatStepResponse> steps = execution.steps().stream()
-                .map(step -> new AgentChatStepResponse(step.stepNumber(), step.plan().toolName(), step.status())).toList();
+                .map(AgentChatStepResponse::from).toList();
         List<GroundedEvidenceResponse> evidence = answer.evidence().stream().map(GroundedEvidenceResponse::from).toList();
-        return new AgentChatResponse(id, execution.status(), question, answer.answer(), answer.grounded(), answer.fallbackUsed(), steps, evidence);
+        return new AgentChatResponse(id, execution.status(), question, answer.answer(), answer.grounded(), answer.fallbackUsed(), execution.stopReason(), steps, evidence);
     }
 }

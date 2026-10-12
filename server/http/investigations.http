@@ -1,4 +1,4 @@
-### Create a new investigation (runs the agent and returns the finished run)
+### Create a new investigation (returns at once with status RUNNING; poll GET {id} until it is terminal)
 POST http://localhost:8080/connect-ai/api/investigations
 Content-Type: application/json
 

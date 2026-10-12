@@ -8,11 +8,16 @@ import java.util.Objects;
  * Immutable state accumulated during one dynamic agent execution.
  *
  * This model deliberately contains no MCP SDK or transport types.
+ *
+ * {@code stopReason} is a short, user-safe explanation of why the loop ended
+ * (for example "planner chose FINISH" or "step budget exhausted"). It is null
+ * while the execution is still running.
  */
 public record AgentExecutionState(
         String question,
         List<AgentExecutionStep> steps,
-        AgentExecutionStatus status
+        AgentExecutionStatus status,
+        String stopReason
 ) {
 
     public AgentExecutionState {
@@ -28,11 +33,19 @@ public record AgentExecutionState(
         steps = List.copyOf(steps);
     }
 
+    public AgentExecutionState(
+            String question,
+            List<AgentExecutionStep> steps,
+            AgentExecutionStatus status) {
+        this(question, steps, status, null);
+    }
+
     public static AgentExecutionState initial(String question) {
         return new AgentExecutionState(
                 question,
                 List.of(),
-                AgentExecutionStatus.RUNNING);
+                AgentExecutionStatus.RUNNING,
+                null);
     }
 
     public AgentExecutionState addStep(AgentExecutionStep step) {
@@ -45,7 +58,8 @@ public record AgentExecutionState(
         return new AgentExecutionState(
                 question,
                 updated,
-                status);
+                status,
+                stopReason);
     }
 
     public AgentExecutionState withStatus(
@@ -53,10 +67,26 @@ public record AgentExecutionState(
         return new AgentExecutionState(
                 question,
                 steps,
-                Objects.requireNonNull(newStatus, "newStatus"));
+                Objects.requireNonNull(newStatus, "newStatus"),
+                stopReason);
+    }
+
+    /** Terminal transition with an explanation of why the loop stopped. */
+    public AgentExecutionState finish(
+            AgentExecutionStatus newStatus,
+            String reason) {
+        return new AgentExecutionState(
+                question,
+                steps,
+                Objects.requireNonNull(newStatus, "newStatus"),
+                reason);
     }
 
     public int stepCount() {
         return steps.size();
+    }
+
+    public boolean hasSuccessfulStep() {
+        return steps.stream().anyMatch(step -> step.status() == AgentStepStatus.SUCCESS);
     }
 }

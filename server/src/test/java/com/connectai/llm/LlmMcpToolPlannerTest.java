@@ -95,7 +95,7 @@ class LlmMcpToolPlannerTest {
                                 "Find something",
                                 List.of(candidate("search"))))
                 .isInstanceOf(LlmException.class)
-                .hasMessageContaining("not available");
+                .hasMessageContaining("is not a candidate");
     }
 
     @Test

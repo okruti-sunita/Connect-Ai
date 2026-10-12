@@ -34,10 +34,16 @@ public class LlmConfig {
                                @Value("${connectai.llm.model:claude-haiku-4-5-20251001}") String model,
                                @Value("${connectai.llm.max-tokens:1024}") int maxTokens,
                                @Value("${connectai.llm.timeout-seconds:30}") long timeoutSeconds,
+                               @Value("${connectai.llm.ollama-num-ctx:8192}") int ollamaNumCtx,
+                               @Value("${connectai.llm.temperature:0}") double temperature,
                                ObjectMapper mapper) {
         if ("ollama".equalsIgnoreCase(provider)) {
-            log.info("LLM mode ON: provider=ollama, model={}, baseUrl={}", ollamaModel, ollamaBaseUrl);
-            return new OllamaClient(ollamaBaseUrl, ollamaModel, Duration.ofSeconds(timeoutSeconds), mapper);
+            log.info("LLM mode ON: provider=ollama, model={}, baseUrl={}, numCtx={}, maxTokens={}, timeoutSeconds={}",
+                    ollamaModel, ollamaBaseUrl, ollamaNumCtx, maxTokens, timeoutSeconds);
+            OllamaClient client = new OllamaClient(ollamaBaseUrl, ollamaModel, Duration.ofSeconds(timeoutSeconds),
+                    mapper, ollamaNumCtx, maxTokens, temperature);
+            reportModelAvailability(client);
+            return client;
         }
         if (!"anthropic".equalsIgnoreCase(provider)) {
             throw new IllegalStateException("Unsupported connectai.llm.provider='" + provider
@@ -49,6 +55,43 @@ public class LlmConfig {
         }
         log.info("LLM mode ON: provider=anthropic, model={}", model);
         return new AnthropicClient(baseUrl, apiKey, model, maxTokens, Duration.ofSeconds(timeoutSeconds), mapper);
+    }
+
+    /**
+     * Startup diagnostic only: a missing model or stopped Ollama is reported loudly but does not
+     * prevent startup, so connections can still be configured. Investigations then fail with the
+     * same actionable message, and /api/health reports it.
+     */
+    /**
+     * Loads the model into memory in the background so the first investigation does not pay the
+     * several-second load time. Purely an optimisation: failures are logged and ignored.
+     */
+    private static void warmUp(OllamaClient client) {
+        Thread warmUp = new Thread(() -> {
+            long started = System.nanoTime();
+            try {
+                client.complete("Reply with OK.", "OK");
+                log.info("Ollama model '{}' warmed up in {} ms", client.model(), (System.nanoTime() - started) / 1_000_000);
+            } catch (RuntimeException e) {
+                log.warn("Ollama warm-up failed (the first request will be slower): {}", e.getMessage());
+            }
+        }, "ollama-warmup");
+        warmUp.setDaemon(true);
+        warmUp.start();
+    }
+
+    private static void reportModelAvailability(OllamaClient client) {
+        try {
+            if (OllamaClient.isInstalled(client.model(), client.installedModels())) {
+                log.info("Ollama model '{}' is installed and reachable at {}", client.model(), client.baseUrl());
+                warmUp(client);
+            } else {
+                log.error("Ollama model '{}' is NOT installed at {}. Run: ollama pull {}",
+                        client.model(), client.baseUrl(), client.model());
+            }
+        } catch (LlmException e) {
+            log.error("Ollama readiness check failed: {}", e.getMessage());
+        }
     }
 
     @Bean

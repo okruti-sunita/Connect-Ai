@@ -5,12 +5,15 @@ import './style/connect-tool-modal.scss';
 import ToolLogo from './tool-logo';
 import {CUSTOM_ITEM, type CatalogItem} from './tool-catalog';
 import {toolsApi, ToolsApiError, type Capability, type RegisterToolPayload} from './tools-api';
+import {openSignInPopup, signInWithPopup} from './oauth';
 
 interface FormValues {
     connectionName: string;
     deployment?: string;
     endpoint: string;
     authType: 'NONE' | 'BEARER';
+    /** For tools that support OAuth: sign in with the provider, or paste a token. */
+    authMethod?: 'oauth' | 'token';
     token?: string;
 }
 
@@ -22,15 +25,30 @@ interface TestState {
     capabilitiesFailed: boolean;
 }
 
-const STAGES = ['Registering the connection', 'Connecting to the server', 'Discovering capabilities'];
+const TOKEN_STAGES = ['Registering the connection', 'Connecting to the server', 'Discovering capabilities'];
+const oauthStages = (provider: string) =>
+    ['Registering the connection', `Signing in with ${provider}`, 'Connecting to the server', 'Discovering capabilities'];
 
 interface WizardProps {
     item: CatalogItem;
+    /** Names already used by saved connections (names must be unique). */
+    existingNames: string[];
     onClose: () => void;
     onChanged: () => void;
 }
 
-const Wizard = ({item, onClose, onChanged}: WizardProps) => {
+/** "GitHub - Main", then "GitHub - 2", "GitHub - 3"... so a second account gets a free name. */
+export function uniqueConnectionName(base: string, existingNames: string[]): string {
+    const taken = new Set(existingNames.map((n) => n.trim().toLowerCase()));
+    if (!base || !taken.has(base.toLowerCase())) return base;
+    const stem = base.replace(/\s*-\s*Main$/i, '');
+    for (let i = 2; ; i++) {
+        const candidate = `${stem} - ${i}`;
+        if (!taken.has(candidate.toLowerCase())) return candidate;
+    }
+}
+
+const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
     const [form] = Form.useForm<FormValues>();
     const [step, setStep] = useState<1 | 2>(1);
     const [test, setTest] = useState<TestState | null>(null);
@@ -50,11 +68,33 @@ const Wizard = ({item, onClose, onChanged}: WizardProps) => {
 
     const isCustom = item.id === 'custom';
     const watchedAuth = Form.useWatch('authType', form);
-    const authType = isCustom ? (watchedAuth ?? 'NONE') : 'BEARER';
+    const watchedMethod = Form.useWatch('authMethod', form);
+    // null while loading; true/false once the server said whether the provider is configured.
+    const [oauthReady, setOauthReady] = useState<boolean | null>(item.oauthProvider ? null : false);
+    useEffect(() => {
+        if (!item.oauthProvider) return;
+        let alive = true;
+        toolsApi.oauthProviders()
+            .then((providers) => {
+                if (!alive) return;
+                const ready = providers.some((p) => p.id === item.oauthProvider && p.configured);
+                setOauthReady(ready);
+                if (!ready) form.setFieldValue('authMethod', 'token');
+            })
+            .catch(() => {
+                if (alive) setOauthReady(false);
+            });
+        return () => {
+            alive = false;
+        };
+    }, [item.oauthProvider, form]);
+    const useOAuth = !isCustom && !!item.oauthProvider && oauthReady === true && (watchedMethod ?? 'oauth') === 'oauth';
+    const authType: RegisterToolPayload['authType'] = isCustom ? (watchedAuth ?? 'NONE') : useOAuth ? 'OAUTH' : 'BEARER';
+    const stages = authType === 'OAUTH' ? oauthStages(item.name) : TOKEN_STAGES;
     const endpoint = Form.useWatch('endpoint', form);
     const usingManagedAddress = !isCustom && !!item.endpoint && endpoint === item.endpoint;
 
-    const runTest = async () => {
+    const runTest = async (popup: Window | null) => {
         const v = form.getFieldsValue(true) as FormValues;
         const payload: RegisterToolPayload = {
             name: v.connectionName.trim(),
@@ -63,6 +103,7 @@ const Wizard = ({item, onClose, onChanged}: WizardProps) => {
             authType,
             secret: authType === 'BEARER' ? (v.token ?? '') : null,
             enabled: true,
+            oauthProvider: authType === 'OAUTH' ? item.oauthProvider : null,
         };
         const fingerprint = JSON.stringify([payload.name, payload.endpoint, payload.authType, payload.secret]);
         const set = (s: TestState) => {
@@ -80,9 +121,18 @@ const Wizard = ({item, onClose, onChanged}: WizardProps) => {
             const id = registered.current.id;
             stage = 1;
             set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
-            await toolsApi.connect(id);
-            if ((await toolsApi.status(id)) !== 'CONNECTED') throw new ToolsApiError('not connected', 0);
-            stage = 2;
+            if (authType === 'OAUTH') {
+                // The backend exchanges the code and stores the token; this only waits for the outcome.
+                const signIn = await signInWithPopup(id, popup);
+                if (!signIn.ok) throw new ToolsApiError(signIn.message, 401);
+                stage = 2;
+                set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
+            }
+            const connection = await toolsApi.connect(id);
+            if (!connection?.initialized) {
+                throw new ToolsApiError(connection?.error ?? 'The MCP server did not complete the handshake.', 502);
+            }
+            stage += 1;
             set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
             let capabilities: Capability[] = [];
             let capabilitiesFailed = false;
@@ -91,28 +141,29 @@ const Wizard = ({item, onClose, onChanged}: WizardProps) => {
             } catch {
                 capabilitiesFailed = true;
             }
-            set({phase: 'success', stage: 3, capabilities, capabilitiesFailed});
+            set({phase: 'success', stage: stages.length, capabilities, capabilitiesFailed});
             onChangedRef.current();
         } catch (error) {
             console.error('Connection test failed at stage', stage, error instanceof Error ? error.name : error);
-            const failureMessage =
-                stage === 0 && error instanceof ToolsApiError && error.status !== 0
-                    ? error.message
-                    : stage === 0
-                        ? "Can't reach the Connect AI server. Check that the backend is running."
-                        : 'We could not connect to the server. Check the address and token, then try again.';
+            // Show the backend's explanation (bad URL, refused connection, 401 token, ...).
+            const failureMessage = error instanceof ToolsApiError
+                ? error.message
+                : 'We could not connect to the server. Check the address and token, then try again.';
             set({phase: 'failed', stage, error: failureMessage, capabilities: [], capabilitiesFailed: false});
             onChangedRef.current();
         }
     };
 
     const handleTest = async () => {
+        // The popup must be opened synchronously in the click, before any await, or it is blocked.
+        const popup = authType === 'OAUTH' ? openSignInPopup() : null;
         try {
             await form.validateFields();
         } catch {
+            popup?.close();
             return;
         }
-        void runTest();
+        void runTest(popup);
     };
 
     const handleFinish = () => {
@@ -150,17 +201,33 @@ const Wizard = ({item, onClose, onChanged}: WizardProps) => {
                             layout="vertical"
                             requiredMark={false}
                             initialValues={{
-                                connectionName: item.defaultConnectionName,
+                                connectionName: uniqueConnectionName(item.defaultConnectionName, existingNames),
                                 deployment: item.deployments?.[0]?.id,
                                 endpoint: initialEndpoint,
                                 authType: isCustom ? 'NONE' : 'BEARER',
+                                authMethod: item.oauthProvider ? 'oauth' : 'token',
                             }}
                         >
                             <Form.Item
                                 label="Connection name"
                                 name="connectionName"
                                 extra="Give this connection a label (useful when adding more than one)."
-                                rules={[{required: true, whitespace: true, message: 'Enter a name'}]}
+                                rules={[
+                                    {required: true, whitespace: true, message: 'Enter a name'},
+                                    {
+                                        validator: (_, value?: string) => {
+                                            const name = (value ?? '').trim().toLowerCase();
+                                            // The connection this dialog already registered (Test, then Back) keeps its name.
+                                            const own = registered.current
+                                                ? String((JSON.parse(registered.current.fingerprint) as unknown[])[0] ?? '').trim().toLowerCase()
+                                                : null;
+                                            const clash = name !== own && existingNames.some((n) => n.trim().toLowerCase() === name);
+                                            return clash
+                                                ? Promise.reject(new Error('A connection with this name already exists. Use a different name, e.g. "GitHub - Work".'))
+                                                : Promise.resolve();
+                                        },
+                                    },
+                                ]}
                             >
                                 <Input maxLength={100} autoComplete="off"/>
                             </Form.Item>
@@ -200,6 +267,23 @@ const Wizard = ({item, onClose, onChanged}: WizardProps) => {
                                 </Form.Item>
                             )}
 
+                            {!isCustom && item.oauthProvider && (
+                                <Form.Item label="How should Connect AI access it?" name="authMethod"
+                                           extra={oauthReady === false
+                                               ? `Sign-in with ${item.name} is not set up on this server yet (an admin sets its OAuth client id and secret). Use an access token for now.`
+                                               : authType === 'OAUTH'
+                                                   ? `A ${item.name} window opens; approve access there. No token to copy.`
+                                                   : undefined}>
+                                    <Segmented
+                                        block
+                                        options={[
+                                            {label: `Sign in with ${item.name}`, value: 'oauth', disabled: oauthReady !== true},
+                                            {label: 'Access token', value: 'token'},
+                                        ]}
+                                    />
+                                </Form.Item>
+                            )}
+
                             {authType === 'BEARER' && (
                                 <Form.Item
                                     label={item.tokenLabel}
@@ -218,7 +302,7 @@ const Wizard = ({item, onClose, onChanged}: WizardProps) => {
                         <div>
                             <h3>Test connection</h3>
                             <ol className="test-list" aria-live="polite">
-                                {STAGES.map((label, i) => {
+                                {stages.map((label, i) => {
                                     const done = test.stage > i || test.phase === 'success';
                                     const failed = test.phase === 'failed' && test.stage === i;
                                     const active = test.phase === 'running' && test.stage === i;
@@ -273,7 +357,7 @@ const Wizard = ({item, onClose, onChanged}: WizardProps) => {
                         {test?.phase === 'success' ? (
                             <Button type="primary" onClick={handleFinish}>Save &amp; Finish</Button>
                         ) : (
-                            <Button type="primary" disabled={running} loading={running} onClick={() => void runTest()}>
+                            <Button type="primary" disabled={running} loading={running} onClick={() => void runTest(authType === 'OAUTH' ? openSignInPopup() : null)}>
                                 {running ? 'Testing' : 'Retry test'}
                             </Button>
                         )}
@@ -290,16 +374,19 @@ interface ToolConnectModalProps {
     preset: CatalogItem | null;
     /** Changes on every opening so each opening starts with a clean form and test state. */
     session: number;
+    /** Names already used by saved connections. */
+    existingNames: string[];
     onClose: () => void;
     /** Called whenever the server-side tool list changed (registered, connected or failed). */
     onChanged: () => void;
 }
 
-const ToolConnectModal = ({open, preset, session, onClose, onChanged}: ToolConnectModalProps) => (
+const ToolConnectModal = ({open, preset, session, existingNames, onClose, onChanged}: ToolConnectModalProps) => (
     <Modal open={open} footer={null} title={null} centered width={900} mask={{closable: false}} destroyOnHidden onCancel={onClose}
            className="tool-wizard-modal" styles={{container: {padding: 0, overflow: 'hidden'}}}>
         {/* antd keeps closed content mounted until the animation ends, so a new key per opening is what resets it. */}
-        <Wizard key={`${preset?.id ?? 'custom'}-${session}`} item={preset ?? CUSTOM_ITEM} onClose={onClose} onChanged={onChanged}/>
+        <Wizard key={`${preset?.id ?? 'custom'}-${session}`} item={preset ?? CUSTOM_ITEM}
+                existingNames={existingNames} onClose={onClose} onChanged={onChanged}/>
     </Modal>
 );
 

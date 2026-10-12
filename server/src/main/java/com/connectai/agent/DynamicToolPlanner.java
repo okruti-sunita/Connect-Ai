@@ -31,4 +31,17 @@ public interface DynamicToolPlanner {
             AgentExecutionState state) {
         return plan(question, availableTools);
     }
+
+    /**
+     * Richer form used by the executor: a FINISH carries a reason. The default keeps
+     * simple planners working unchanged.
+     */
+    default PlannerDecision decide(
+            String question,
+            List<McpToolCandidate> availableTools,
+            AgentExecutionState state) {
+        return plan(question, availableTools, state)
+                .map(PlannerDecision::run)
+                .orElseGet(() -> PlannerDecision.finish("planner selected no further tool"));
+    }
 }

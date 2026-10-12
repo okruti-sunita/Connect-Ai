@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.UUID;
 
 public record AgentConversationDetailResponse(UUID id, String question, AgentExecutionStatus status,
-        String answer, boolean grounded, boolean fallbackUsed, Instant createdAt, Instant completedAt,
+        String answer, boolean grounded, boolean fallbackUsed, String stopReason, Instant createdAt, Instant completedAt,
         List<AgentChatStepResponse> steps, List<GroundedEvidenceResponse> evidence) {
     public AgentConversationDetailResponse {
         steps = steps == null ? List.of() : List.copyOf(steps);
@@ -16,12 +16,12 @@ public record AgentConversationDetailResponse(UUID id, String question, AgentExe
 
     public static AgentConversationDetailResponse from(AgentConversation conversation) {
         List<AgentChatStepResponse> steps = conversation.getSteps().stream()
-                .map(step -> new AgentChatStepResponse(step.getStepNumber(), step.getToolName(), step.getStatus())).toList();
+                .map(AgentChatStepResponse::from).toList();
         List<GroundedEvidenceResponse> evidence = conversation.getEvidence().stream()
                 .map(item -> new GroundedEvidenceResponse(item.getCitation(), item.getStepNumber(),
                         item.getServerId(), item.getToolName(), item.getContent())).toList();
         return new AgentConversationDetailResponse(conversation.getId(), conversation.getQuestion(),
                 conversation.getStatus(), conversation.getAnswer(), conversation.isGrounded(),
-                conversation.isFallbackUsed(), conversation.getCreatedAt(), conversation.getCompletedAt(), steps, evidence);
+                conversation.isFallbackUsed(), conversation.getStopReason(), conversation.getCreatedAt(), conversation.getCompletedAt(), steps, evidence);
     }
 }

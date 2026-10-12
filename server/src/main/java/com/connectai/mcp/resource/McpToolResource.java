@@ -58,6 +58,13 @@ public class McpToolResource {
         return ResponseEntity.ok(mcpConnectionService.disconnect(UUID.fromString(id)));
     }
 
+    /** 204 when removed; 409 while it still has a live session (disconnect first); 404 when unknown. */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> remove(@PathVariable UUID id) {
+        mcpConnectionService.remove(id);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/{id}/tools")
     public ResponseEntity<McpToolDiscoveryResponse> discoverTools(@PathVariable UUID id) {
         return ResponseEntity.ok(mcpToolDiscoveryService.discover(id));

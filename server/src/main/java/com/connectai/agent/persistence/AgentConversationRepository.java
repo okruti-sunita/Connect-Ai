@@ -7,4 +7,6 @@ import java.util.UUID;
 
 public interface AgentConversationRepository extends JpaRepository<AgentConversation, UUID> {
     List<AgentConversation> findTop20ByOrderByCreatedAtDesc();
+
+    List<AgentConversation> findByStatus(com.connectai.agent.AgentExecutionStatus status);
 }

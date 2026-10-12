@@ -1,6 +1,10 @@
 export type ToolSource = "github" | "jira" | "grafana" | "splunk" | "kafka" | "slack" | "mcp";
-export type InvestigationStatus = "resolved" | "in-progress" | "failed" | "archived";
+
+/** UI form of com.connectai.domain.InvestigationStatus (plus the archived flag). */
+export type InvestigationStatus = "resolved" | "partial" | "inconclusive" | "in-progress" | "failed" | "archived";
 export type EvidenceCategory = "Code" | "Tickets" | "Metrics" | "Logs" | "Chat" | "Other";
+
+export const TERMINAL_STATUSES: InvestigationStatus[] = ["resolved", "partial", "inconclusive", "failed", "archived"];
 
 export interface InvestigationSummary {
     id: string;
@@ -16,10 +20,20 @@ export interface InvestigationTag {
     accent?: boolean; // highlighted chip (ticket / PR / commit)
 }
 
+/** One real tool call recorded by the backend (InvestigationResponse.StepResponse). */
 export interface InvestigationStep {
     id: string;
+    stepNumber: number;
     source: ToolSource;
-    text: string;
+    toolName: string;
+    /** Connection the call used ("GitHub - Work"); null when that connection was removed. */
+    serverName: string | null;
+    status: "SUCCESS" | "FAILED";
+    /** Redacted JSON of the arguments actually sent. */
+    argumentsJson: string | null;
+    reason: string | null;
+    errorMessage: string | null;
+    durationMs: number | null;
 }
 
 export interface DiffLine {
@@ -41,10 +55,15 @@ export interface EvidenceItem {
     id: string;
     source: ToolSource;
     category: EvidenceCategory;
+    /** Citation id used in the answer (E1, E2...) or a legacy source reference. */
     title: string;
     snippet: string;
-    confidence: number; // 0-100
+    /** 0-100, only set by the legacy demo tools; null for real tool evidence. */
+    confidence: number | null;
     when: string;
+    toolName?: string | null;
+    serverName?: string | null;
+    stepNumber?: number | null;
     url?: string;
     detail?: EvidenceDetail;
 }
@@ -58,9 +77,13 @@ export interface AnalysisSummary {
 export interface InvestigationDetailData {
     id: string;
     title: string;
+    question: string;
     status: InvestigationStatus;
     startedAgo: string;
+    completedAgo: string | null;
     startedBy?: string; // same: filled in once users exist
+    /** Why the agent stopped (budget, no relevant tool, planner error...). */
+    stopReason: string | null;
     tags: InvestigationTag[];
     steps: InvestigationStep[];
     evidence: EvidenceItem[];

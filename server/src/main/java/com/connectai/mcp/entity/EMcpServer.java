@@ -58,6 +58,17 @@ public class EMcpServer extends AbstractUUIDPersistable {
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
 
+    /** OAuth provider id (connectai.oauth.providers key) when authType is OAUTH. */
+    @Column(name = "oauth_provider", length = 50)
+    private String oauthProvider;
+
+    @Column(name = "encrypted_refresh_token", length = 4000)
+    private String encryptedRefreshToken;
+
+    /** Null when the provider issued a non-expiring token. */
+    @Column(name = "token_expires_at")
+    private OffsetDateTime tokenExpiresAt;
+
     public EMcpServer(
             String name,
             McpTransportType transport,
@@ -73,6 +84,28 @@ public class EMcpServer extends AbstractUUIDPersistable {
         this.encryptedSecret = encryptedSecret;
         this.enabled = enabled;
         this.status = McpConnectionStatus.REGISTERED;
+    }
+
+    public void useOAuthProvider(String providerId) {
+        this.oauthProvider = providerId;
+    }
+
+    /** Stores a freshly issued OAuth token (already encrypted). The old one is replaced. */
+    public void storeOAuthToken(String encryptedAccessToken, String encryptedRefreshToken, OffsetDateTime expiresAt) {
+        this.encryptedSecret = encryptedAccessToken;
+        if (encryptedRefreshToken != null) {
+            this.encryptedRefreshToken = encryptedRefreshToken;
+        }
+        this.tokenExpiresAt = expiresAt;
+        this.lastError = null;
+    }
+
+    public void recordAuthorizationFailure(String reason) {
+        this.lastError = reason;
+    }
+
+    public boolean hasCredential() {
+        return encryptedSecret != null && !encryptedSecret.isBlank();
     }
 
     public void markConnecting() {
@@ -93,6 +126,13 @@ public class EMcpServer extends AbstractUUIDPersistable {
 
     public void markDisconnected() {
         this.status = McpConnectionStatus.DISCONNECTED;
+        this.lastError = null;
+    }
+
+    /** The stored state claimed a live session that this process does not have. */
+    public void markStale(String reason) {
+        this.status = McpConnectionStatus.DISCONNECTED;
+        this.lastError = reason;
     }
 
     @PrePersist

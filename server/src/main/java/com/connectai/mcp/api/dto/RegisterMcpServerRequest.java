@@ -23,6 +23,13 @@ public record RegisterMcpServerRequest(
 
         String secret,
 
-        Boolean enabled
+        Boolean enabled,
+
+        /** For authType OAUTH: the provider to sign in with (a connectai.oauth.providers key, e.g. "github"). */
+        String oauthProvider
 ) {
+    public RegisterMcpServerRequest(String name, McpTransportType transport, String endpoint, McpAuthType authType,
+                                    String secret, Boolean enabled) {
+        this(name, transport, endpoint, authType, secret, enabled, null);
+    }
 }

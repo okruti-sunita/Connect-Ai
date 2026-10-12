@@ -1,21 +1,27 @@
 import { useState } from "react";
-import { Input, Select, Spin } from "antd";
+import { Alert, Button, Input, Select, Spin } from "antd";
 import { ChevronRight, Search, Sparkles } from "lucide-react";
 import "./style/investigations.scss";
 import ToolIcon from "./ToolIcon";
+import { STATUS_LABEL } from "./api";
 import type { InvestigationSummary } from "./types";
 
 interface Props {
     items: InvestigationSummary[];
     loading: boolean;
+    loadError: string | null;
     starting: boolean;
+    startError: string | null;
     onOpen: (item: InvestigationSummary) => void;
     onStart: (question: string) => void;
+    onReload: () => void;
+    /** Example questions answerable by the live connections. */
+    examples?: string[];
 }
 
-// const QUICK_ACTIONS = ["Attach a Jira ticket", "Paste a Grafana alert", "Link a PR", "Paste a Splunk query"];
+const MAX_QUESTION = 2000;
 
-const InvestigationList = ({ items, loading, starting, onOpen, onStart }: Props) => {
+const InvestigationList = ({ items, loading, loadError, starting, startError, onOpen, onStart, onReload, examples = [] }: Props) => {
     const [question, setQuestion] = useState("");
     const [statusFilter, setStatusFilter] = useState("all");
     const [search, setSearch] = useState("");
@@ -26,55 +32,58 @@ const InvestigationList = ({ items, loading, starting, onOpen, onStart }: Props)
             i.title.toLowerCase().includes(search.toLowerCase())
     );
 
-    // const submit = () => {
-    //     if (!question.trim()) return;
-    //     onStart(question.trim());
-    //     setQuestion("");
-    // };
+    const trimmed = question.trim();
+    const submit = () => {
+        // The button is disabled while a submission is pending, so double clicks cannot start two runs.
+        if (!trimmed || starting || trimmed.length > MAX_QUESTION) return;
+        onStart(trimmed);
+    };
 
     return (
         <div className="inv-page">
             <div className="inv-header">
                 <div>
                     <h1>Investigations</h1>
-                    <p>Ask a question, paste an alert, or link a ticket. Connect AI will gather evidence from your connected tools.</p>
+                    <p>Ask a question. Connect AI picks tools from your connected MCP servers, runs them and answers from the real results.</p>
                 </div>
-                {/*<button type="button" className="btn-outline" onClick={() => document.getElementById("inv-question")?.focus()}>*/}
-                {/*    New investigation*/}
-                {/*</button>*/}
             </div>
 
-            {/*<div className="inv-start-card">*/}
-            {/*    <h2>Start a new investigation</h2>*/}
-            {/*    <Input.TextArea*/}
-            {/*        id="inv-question"*/}
-            {/*        rows={3}*/}
-            {/*        value={question}*/}
-            {/*        onChange={(e) => setQuestion(e.target.value)}*/}
-            {/*        placeholder="e.g. Why is checkout latency spiking in prod since 10am?"*/}
-            {/*    />*/}
-            {/*    <div className="inv-start-actions">*/}
-            {/*        <div className="quick-chips">*/}
-            {/*            {QUICK_ACTIONS.map((a) => (*/}
-            {/*                <button key={a} type="button" onClick={() => setQuestion((q) => (q ? `${q}\n${a}: ` : `${a}: `))}>*/}
-            {/*                    {a}*/}
-            {/*                </button>*/}
-            {/*            ))}*/}
-            {/*        </div>*/}
-            {/*        <button type="button" className="btn-primary" onClick={submit} disabled={!question.trim() || starting}>*/}
-            {/*            <Sparkles size={16} /> {starting ? "Starting..." : "Investigate"}*/}
-            {/*        </button>*/}
-            {/*    </div>*/}
-            {/*</div>*/}
-
-            {/*<div className="inv-filters">*/}
-            {/*    <Select defaultValue="all" options={[{ value: "all", label: "Scope: All connected tools" }]} />*/}
-            {/*    <Select defaultValue="24h" options={[*/}
-            {/*        { value: "1h", label: "Time window: Last 1h" },*/}
-            {/*        { value: "24h", label: "Time window: Last 24h" },*/}
-            {/*        { value: "7d", label: "Time window: Last 7d" }*/}
-            {/*    ]} />*/}
-            {/*</div>*/}
+            <div className="inv-start-card">
+                <h2>Start a new investigation</h2>
+                <Input.TextArea
+                    id="inv-question"
+                    aria-label="Investigation question"
+                    rows={3}
+                    value={question}
+                    maxLength={MAX_QUESTION}
+                    disabled={starting}
+                    onChange={(e) => setQuestion(e.target.value)}
+                    onPressEnter={(e) => {
+                        if (!e.shiftKey) {
+                            e.preventDefault();
+                            submit();
+                        }
+                    }}
+                    placeholder="e.g. Use the available GitHub MCP tools to identify my authenticated GitHub account and report the login."
+                />
+                {examples.length > 0 && (
+                    <div className="inv-examples" aria-label="Example questions">
+                        {examples.map((example) => (
+                            <button key={example} type="button" className="inv-example" disabled={starting}
+                                    onClick={() => setQuestion(example)}>
+                                {example}
+                            </button>
+                        ))}
+                    </div>
+                )}
+                {startError && <Alert className="inv-start-error" type="error" showIcon title={startError} />}
+                <div className="inv-start-actions">
+                    <span className="inv-hint">Enter to submit · Shift+Enter for a new line</span>
+                    <button type="button" className="btn-primary" onClick={submit} disabled={!trimmed || starting}>
+                        <Sparkles size={16} /> {starting ? "Starting..." : "Investigate"}
+                    </button>
+                </div>
+            </div>
 
             <div className="inv-list-head">
                 <h2>Recent investigations</h2>
@@ -82,28 +91,39 @@ const InvestigationList = ({ items, loading, starting, onOpen, onStart }: Props)
                     <Select
                         value={statusFilter}
                         onChange={setStatusFilter}
-                        style={{ width: 130 }}
+                        style={{ width: 140 }}
+                        aria-label="Filter by status"
                         options={[
                             { value: "all", label: "All" },
-                            { value: "resolved", label: "Resolved" },
-                            { value: "in-progress", label: "In progress" },
+                            { value: "resolved", label: "Answered" },
+                            { value: "partial", label: "Partial" },
+                            { value: "inconclusive", label: "Inconclusive" },
+                            { value: "in-progress", label: "Running" },
                             { value: "failed", label: "Failed" },
                             { value: "archived", label: "Archived" }
                         ]}
                     />
-                    <Input prefix={<Search size={15} />} placeholder="Search" value={search}
+                    <Input prefix={<Search size={15} />} placeholder="Search" value={search} aria-label="Search investigations"
                            onChange={(e) => setSearch(e.target.value)} style={{ width: 220 }} />
                 </div>
             </div>
 
             <div className="inv-list">
                 {loading && <div className="inv-empty"><Spin /></div>}
-                {!loading && visible.length === 0 && <div className="inv-empty">No investigations match your filters.</div>}
+                {!loading && loadError && (
+                    <Alert type="error" showIcon title={loadError}
+                           action={<Button size="small" onClick={onReload}>Try again</Button>} />
+                )}
+                {!loading && !loadError && visible.length === 0 && (
+                    <div className="inv-empty">
+                        {items.length === 0 ? "No investigations yet. Ask a question above." : "No investigations match your filters."}
+                    </div>
+                )}
                 {!loading && visible.map((i) => (
                     <button type="button" key={i.id} className="inv-row" onClick={() => onOpen(i)}>
                         <span className={`inv-status ${i.status}`}>
                             <span className="dot" />
-                            {i.status}
+                            {STATUS_LABEL[i.status]}
                         </span>
                         <span className="inv-title">{i.title}</span>
                         <span className="inv-sources">

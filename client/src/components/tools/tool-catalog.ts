@@ -31,6 +31,8 @@ export interface CatalogItem {
     deployments?: DeploymentOption[];
     tokenLabel: string;
     tokenHelp: string;
+    /** OAuth provider id (server config connectai.oauth.providers) when "Sign in with ..." is offered. */
+    oauthProvider?: string;
 }
 
 type EntryInput = Pick<CatalogItem, 'id' | 'name' | 'badge' | 'color' | 'category' | 'blurb' | 'canDo' | 'requires'> &
@@ -50,6 +52,7 @@ function entry(o: EntryInput): CatalogItem {
 export const CATALOG: CatalogItem[] = [
     entry({
         id: 'github', name: 'GitHub', badge: 'GH', color: '#24292f', category: 'Source Control',
+        oauthProvider: 'github',
         blurb: 'Search code, review pull requests and inspect commits.',
         about: 'Connect to GitHub to search code, review PRs, inspect commits and issues.',
         canDo: ['Search code and repositories', 'View PRs and reviews', 'Inspect commits and diffs', 'Read issues and comments'],

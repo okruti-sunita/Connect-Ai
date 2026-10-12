@@ -4,12 +4,17 @@ import java.util.Objects;
 
 /**
  * Immutable record of one planned tool execution.
+ *
+ * {@code errorMessage} is a short, redacted explanation when the step failed
+ * (transport failure, tool-level error or rejected arguments); null otherwise.
  */
 public record AgentExecutionStep(
         int stepNumber,
         ToolSelectionPlan plan,
         ToolExecutionResult result,
-        AgentStepStatus status
+        AgentStepStatus status,
+        String errorMessage,
+        long durationMs
 ) {
 
     public AgentExecutionStep {
@@ -21,5 +26,17 @@ public record AgentExecutionStep(
         Objects.requireNonNull(plan, "plan");
         Objects.requireNonNull(result, "result");
         Objects.requireNonNull(status, "status");
+
+        if (durationMs < 0) {
+            durationMs = 0;
+        }
+    }
+
+    public AgentExecutionStep(
+            int stepNumber,
+            ToolSelectionPlan plan,
+            ToolExecutionResult result,
+            AgentStepStatus status) {
+        this(stepNumber, plan, result, status, null, 0);
     }
 }

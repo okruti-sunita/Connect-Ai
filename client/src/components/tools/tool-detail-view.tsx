@@ -11,15 +11,19 @@ interface ToolDetailViewProps {
     onBack: () => void;
     onConnect: () => void;
     onDisconnect: () => void;
+    /** Disconnects (if needed) and deletes this connection, after confirmation. */
+    onRemove: () => void;
+    /** Only for OAuth connections: sign in again (new token) and reconnect. */
+    onSignIn?: () => void;
 }
 
-const ToolDetailView = ({tool, busy, onBack, onConnect, onDisconnect}: ToolDetailViewProps) => {
+const ToolDetailView = ({tool, busy, onBack, onConnect, onDisconnect, onRemove, onSignIn}: ToolDetailViewProps) => {
     const item = findCatalogItem(tool.name);
     const [capabilities, setCapabilities] = useState<Capability[] | null>(null);
     const [failed, setFailed] = useState(false);
     const [query, setQuery] = useState('');
     const [reloadKey, setReloadKey] = useState(0);
-    const connected = tool.status === 'CONNECTED';
+    const connected = tool.runtimeConnected;
 
     useEffect(() => {
         if (!connected) {
@@ -86,22 +90,30 @@ const ToolDetailView = ({tool, busy, onBack, onConnect, onDisconnect}: ToolDetai
                 </div>
                 <div className="detail-actions">
                     {connected ? (
-                        <Button danger loading={busy} onClick={onDisconnect}>Disconnect</Button>
+                        <Button loading={busy} onClick={onDisconnect}>Disconnect</Button>
                     ) : (
                         <Button type="primary" loading={busy} onClick={onConnect}>
                             {tool.status === 'REGISTERED' ? 'Connect' : 'Reconnect'}
                         </Button>
                     )}
+                    {onSignIn && (
+                        <Button disabled={busy} onClick={onSignIn}>
+                            {tool.secretConfigured ? 'Re-authorize' : 'Sign in'}
+                        </Button>
+                    )}
+                    <Button danger disabled={busy} onClick={onRemove}>Remove</Button>
                 </div>
             </header>
-            {tool.status === 'FAILED' && (
-                <p className="inline-alert" role="alert">The last connection attempt failed. Check the endpoint and token, then reconnect.</p>
+            {!connected && tool.lastError && (
+                <p className="inline-alert" role="alert">{tool.lastError}</p>
             )}
             <div className="info-tiles">
                 <div><span>Status</span><strong>{STATUS_LABEL[tool.status]}</strong></div>
                 <div><span>Last connected</span><strong>{relativeTime(tool.lastConnectedAt)}</strong></div>
                 <div><span>Capabilities exposed</span><strong>{capabilities ? capabilities.length : '-'}</strong></div>
-                <div><span>Authentication</span><strong>{tool.authType === 'BEARER' ? 'Bearer token' : 'None'}</strong></div>
+                <div><span>Authentication</span><strong>{tool.authType === 'OAUTH'
+                    ? (tool.secretConfigured ? `Signed in (${tool.oauthProvider ?? 'OAuth'})` : 'OAuth: not signed in')
+                    : tool.authType === 'BEARER' ? 'Access token' : 'None'}</strong></div>
             </div>
             <Tabs
                 className="detail-tabs"

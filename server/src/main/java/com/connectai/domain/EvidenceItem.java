@@ -11,6 +11,7 @@ import jakarta.persistence.ManyToOne;
 import lombok.Getter;
 
 import java.time.Instant;
+import java.util.UUID;
 
 /**
  * One piece of evidence gathered from an external tool.
@@ -39,6 +40,16 @@ public class EvidenceItem extends AbstractUUIDPersistable {
     @Column(nullable = false)
     private Instant fetchedAt;
 
+    /** Provenance for evidence gathered by the dynamic agent; null for legacy demo evidence. */
+    @Column(name = "step_number")
+    private Integer stepNumber;
+
+    @Column(name = "tool_name", length = 200)
+    private String toolName;
+
+    @Column(name = "server_id")
+    private UUID serverId;
+
     protected EvidenceItem() {
         // required by JPA
     }
@@ -54,6 +65,20 @@ public class EvidenceItem extends AbstractUUIDPersistable {
         this.summary = summary;
         this.confidenceScore = confidenceScore;
         this.fetchedAt = Instant.now();
+    }
+
+    public EvidenceItem(
+            SourceType sourceType,
+            String sourceRef,
+            String summary,
+            int stepNumber,
+            String toolName,
+            UUID serverId
+    ) {
+        this(sourceType, sourceRef, summary, null);
+        this.stepNumber = stepNumber;
+        this.toolName = toolName;
+        this.serverId = serverId;
     }
 
     void setInvestigation(Investigation investigation) {

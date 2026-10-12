@@ -21,11 +21,14 @@ public class GroundedAnswerContextBuilder {
 
         List<GroundedEvidence> evidence = new ArrayList<>();
         List<String> failedTools = new ArrayList<>();
+        List<String> failureDetails = new ArrayList<>();
         int totalChars = 0;
 
         for (AgentExecutionStep step : state.steps()) {
             if (step.status() == AgentStepStatus.FAILED || step.result().error()) {
                 failedTools.add(step.plan().toolName());
+                failureDetails.add("step " + step.stepNumber() + " " + step.plan().toolName() + ": "
+                        + (step.errorMessage() == null ? "failed" : step.errorMessage()));
                 continue;
             }
 
@@ -57,7 +60,9 @@ public class GroundedAnswerContextBuilder {
                 state.question(),
                 state.status(),
                 evidence,
-                failedTools);
+                failedTools,
+                failureDetails,
+                state.stopReason());
     }
 
     private static String renderResult(ToolExecutionResult result) {
@@ -75,7 +80,7 @@ public class GroundedAnswerContextBuilder {
                     text.append("[")
                             .append(content.type() == null ? "content" : content.type())
                             .append("] ")
-                            .append(content.text());
+                            .append(JsonCompactor.compact(content.text()));
                 }
             });
         }

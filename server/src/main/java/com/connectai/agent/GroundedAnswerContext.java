@@ -12,7 +12,9 @@ public record GroundedAnswerContext(
         String question,
         AgentExecutionStatus executionStatus,
         List<GroundedEvidence> evidence,
-        List<String> failedTools
+        List<String> failedTools,
+        List<String> failureDetails,
+        String stopReason
 ) {
     public GroundedAnswerContext {
         Objects.requireNonNull(question, "question");
@@ -26,6 +28,15 @@ public record GroundedAnswerContext(
 
         evidence = List.copyOf(evidence);
         failedTools = List.copyOf(failedTools);
+        failureDetails = failureDetails == null ? List.of() : List.copyOf(failureDetails);
+    }
+
+    public GroundedAnswerContext(
+            String question,
+            AgentExecutionStatus executionStatus,
+            List<GroundedEvidence> evidence,
+            List<String> failedTools) {
+        this(question, executionStatus, evidence, failedTools, List.of(), null);
     }
 
     public boolean hasEvidence() {

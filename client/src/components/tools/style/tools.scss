@@ -418,3 +418,13 @@ $bad: #b91c1c;
     padding: 20px 16px;
   }
 }
+
+.conn-error {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: #c0392b;
+}

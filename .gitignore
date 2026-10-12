@@ -30,3 +30,8 @@ target/
 *.log
 .env
 *.key
+
+# Local secrets (Spring Boot loads server/config/application.yml automatically)
+server/config/
+.env
+*.key

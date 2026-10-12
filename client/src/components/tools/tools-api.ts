@@ -1,8 +1,9 @@
-// Single place that talks to the backend. Change API_BASE if the context path changes.
-const API_BASE = 'http://localhost:8080/connect-ai/api';
+// Talks to the MCP connection endpoints through the shared HTTP helper (base URL, errors).
+import {apiRequest, ApiError} from '../../api/http';
 
 export type ConnectionStatus = 'REGISTERED' | 'CONNECTING' | 'CONNECTED' | 'FAILED' | 'DISCONNECTED';
 
+/** Mirrors com.connectai.mcp.model.McpServer. The secret itself is never returned. */
 export interface McpServerDto {
     id: string;
     name: string;
@@ -10,20 +11,54 @@ export interface McpServerDto {
     endpoint: string;
     authType: string;
     enabled: boolean;
+    /** Persisted lifecycle state. */
     status: ConnectionStatus;
     lastError: string | null;
     lastConnectedAt: string | null;
     createdAt: string;
     updatedAt: string;
+    /** Live truth: a handshaken MCP session exists in the backend right now. */
+    runtimeConnected: boolean;
+    /** BEARER: a token is stored. OAUTH: the user has signed in. */
+    secretConfigured: boolean;
+    /** OAuth provider id when authType is OAUTH. */
+    oauthProvider: string | null;
+}
+
+/** Mirrors McpConnectionResponse. */
+export interface ConnectionStatusDto {
+    serverId: string;
+    status: ConnectionStatus;
+    initialized: boolean;
+    protocolVersion: string | null;
+    serverName: string | null;
+    serverVersion: string | null;
+    connectedAt: string | null;
+    error: string | null;
 }
 
 export interface RegisterToolPayload {
     name: string;
     transport: 'STREAMABLE_HTTP';
     endpoint: string;
-    authType: 'NONE' | 'BEARER';
+    authType: 'NONE' | 'BEARER' | 'OAUTH';
     secret: string | null;
     enabled: boolean;
+    /** Required for OAUTH, e.g. "github". */
+    oauthProvider?: string | null;
+}
+
+export interface OAuthProviderDto {
+    id: string;
+    displayName: string;
+    /** False until the server has the provider's OAuth client id and secret. */
+    configured: boolean;
+}
+
+export interface OAuthAttemptDto {
+    id: string;
+    status: 'PENDING' | 'SUCCEEDED' | 'FAILED';
+    message: string;
 }
 
 export interface Capability {
@@ -31,46 +66,10 @@ export interface Capability {
     description: string;
 }
 
-export class ToolsApiError extends Error {
-    readonly status: number;
+/** Kept for existing imports; errors carry the server's own message. */
+export {ApiError as ToolsApiError};
 
-    constructor(message: string, status: number) {
-        super(message);
-        this.name = 'ToolsApiError';
-        this.status = status;
-    }
-}
-
-function messageFor(status: number): string {
-    if (status === 400) return 'Some of the details look invalid. Please check them and try again.';
-    if (status === 404) return 'That connection no longer exists. Refresh and try again.';
-    if (status === 409) return 'This conflicts with an existing connection. Try a different name.';
-    return 'The server hit a problem. Please try again.';
-}
-
-export async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
-    let response: Response;
-    try {
-        const init: RequestInit = {
-            method,
-            signal,
-            headers: {Accept: 'application/json', ...(body !== undefined ? {'Content-Type': 'application/json'} : {})},
-        };
-        if (body !== undefined) init.body = JSON.stringify(body);
-        response = await fetch(`${API_BASE}${path}`, init);
-    } catch (cause) {
-        if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
-        throw new ToolsApiError("Can't reach the Connect AI server. Check that the backend is running.", 0);
-    }
-    if (!response.ok) throw new ToolsApiError(messageFor(response.status), response.status);
-    const text = await response.text();
-    if (!text) return undefined as T;
-    try {
-        return JSON.parse(text) as T;
-    } catch {
-        throw new ToolsApiError('The server sent a response we could not read.', response.status);
-    }
-}
+export const request = apiRequest;
 
 /** The discovery DTO shape is not confirmed, so accept a bare array or {tools|capabilities|items: []}. */
 function normalizeCapabilities(raw: unknown): Capability[] {
@@ -92,11 +91,18 @@ function normalizeCapabilities(raw: unknown): Capability[] {
 export const toolsApi = {
     list: (signal?: AbortSignal) => request<McpServerDto[]>('/tools', 'GET', undefined, signal),
     register: (payload: RegisterToolPayload) => request<McpServerDto>('/tools', 'POST', payload),
-    connect: (id: string) => request<unknown>(`/tools/${id}/connect`, 'POST'),
-    disconnect: (id: string) => request<unknown>(`/tools/${id}/disconnect`, 'POST'),
+    connect: (id: string) => request<ConnectionStatusDto>(`/tools/${id}/connect`, 'POST'),
+    disconnect: (id: string) => request<ConnectionStatusDto>(`/tools/${id}/disconnect`, 'POST'),
+    oauthProviders: () => request<OAuthProviderDto[]>('/oauth/providers'),
+    startOAuth: (id: string) => request<{ attemptId: string; authorizationUrl: string }>(`/tools/${id}/oauth/start`, 'POST'),
+    oauthAttempt: (attemptId: string) => request<OAuthAttemptDto>(`/oauth/attempts/${encodeURIComponent(attemptId)}`),
+    /** Deletes the saved connection and its token. The backend answers 409 while it is still connected. */
+    remove: (id: string) => request<void>(`/tools/${id}`, 'DELETE'),
+    connection: (id: string, signal?: AbortSignal) =>
+        request<ConnectionStatusDto>(`/tools/${id}/connection`, 'GET', undefined, signal),
     status: async (id: string, signal?: AbortSignal): Promise<ConnectionStatus> => {
-        const data = await request<{ status?: ConnectionStatus }>(`/tools/${id}/connection`, 'GET', undefined, signal);
-        return data?.status ?? 'REGISTERED';
+        const data = await request<ConnectionStatusDto>(`/tools/${id}/connection`, 'GET', undefined, signal);
+        return data?.initialized ? 'CONNECTED' : data?.status ?? 'REGISTERED';
     },
     capabilities: async (id: string, signal?: AbortSignal): Promise<Capability[]> =>
         normalizeCapabilities(await request<unknown>(`/tools/${id}/tools`, 'GET', undefined, signal)),

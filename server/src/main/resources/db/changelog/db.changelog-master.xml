@@ -397,4 +397,49 @@
         </createIndex>
     </changeSet>
 
+    <!-- ========================================================= -->
+    <!-- 008: execution provenance, stop reasons, completion time  -->
+    <!-- ========================================================= -->
+
+    <changeSet id="008-investigation-provenance" author="connect-ai">
+        <addColumn tableName="investigation">
+            <column name="stop_reason" type="varchar(1000)"/>
+            <column name="completed_at" type="${date.timestamp.type}"/>
+        </addColumn>
+
+        <addColumn tableName="investigation_step">
+            <column name="server_id" type="${id.type}"/>
+            <column name="arguments_json" type="varchar(4000)"/>
+            <column name="reason" type="varchar(500)"/>
+            <column name="error_message" type="varchar(1000)"/>
+            <column name="duration_ms" type="bigint"/>
+        </addColumn>
+
+        <addColumn tableName="evidence_item">
+            <column name="step_number" type="int"/>
+            <column name="tool_name" type="varchar(200)"/>
+            <column name="server_id" type="${id.type}"/>
+        </addColumn>
+
+        <addColumn tableName="agent_conversation">
+            <column name="stop_reason" type="varchar(1000)"/>
+        </addColumn>
+
+        <addColumn tableName="agent_execution_step">
+            <column name="server_id" type="${id.type}"/>
+            <column name="arguments_json" type="varchar(4000)"/>
+            <column name="reason" type="varchar(500)"/>
+            <column name="error_message" type="varchar(1000)"/>
+            <column name="duration_ms" type="bigint"/>
+        </addColumn>
+    </changeSet>
+
+    <changeSet id="009-mcp-oauth" author="connect-ai">
+        <addColumn tableName="mcp_server">
+            <column name="oauth_provider" type="varchar(50)"/>
+            <column name="encrypted_refresh_token" type="varchar(4000)"/>
+            <column name="token_expires_at" type="${date.timestamp.type}"/>
+        </addColumn>
+    </changeSet>
+
 </databaseChangeLog>

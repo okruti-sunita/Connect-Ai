@@ -23,8 +23,23 @@ server:
     context-path: /connect-ai
 
 connectai:
+  cors:
+    allowed-origins: ${CONNECTAI_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
   security:
     encryption-key: ${CONNECTAI_ENCRYPTION_KEY:local-dev-only-change-me}
+  oauth:
+    # Must equal the "Authorization callback URL" of each OAuth app you register.
+    redirect-uri: ${CONNECTAI_OAUTH_REDIRECT_URI:http://localhost:8080/connect-ai/api/oauth/callback}
+    providers:
+      github:
+        display-name: GitHub
+        authorize-url: https://github.com/login/oauth/authorize
+        token-url: https://github.com/login/oauth/access_token
+        client-id: ${GITHUB_OAUTH_CLIENT_ID:}
+        client-secret: ${GITHUB_OAUTH_CLIENT_SECRET:}
+        # OAuth apps only offer coarse scopes; investigations still only use read-only tools.
+        scopes: ${GITHUB_OAUTH_SCOPES:repo read:org read:user}
+        pkce: true
   mcp:
     request-timeout-seconds: ${CONNECTAI_MCP_REQUEST_TIMEOUT_SECONDS:20}
     connect-timeout-seconds: ${CONNECTAI_MCP_CONNECT_TIMEOUT_SECONDS:10}
@@ -39,5 +54,28 @@ connectai:
     ollama-base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
     ollama-model: ${OLLAMA_MODEL:qwen3:1.7b}
     model: claude-haiku-4-5-20251001
+    # Output-token cap per model call (Anthropic max_tokens / Ollama num_predict).
     max-tokens: 1024
-    timeout-seconds: 30
+    timeout-seconds: ${CONNECTAI_LLM_TIMEOUT_SECONDS:30}
+    # Ollama context window. Ollama's own default is small and silently truncates prompts.
+    ollama-num-ctx: ${OLLAMA_NUM_CTX:8192}
+    temperature: 0
+  agent:
+    # Hard budgets for one investigation.
+    max-steps: 6
+    max-duration-seconds: 600
+    # Consecutive failed tool calls tolerated before the run is FAILED.
+    max-consecutive-failures: 2
+    planner:
+      # How many of the live catalog's tools the model is shown per decision.
+      shortlist-size: 6
+      # Model calls per decision, including repair retries for invalid replies.
+      max-attempts: 3
+  investigations:
+    # Run investigations in the background (the UI polls); false runs them inline.
+    async: true
+    concurrency: 2
+    queue-capacity: 20
+logging:
+  pattern:
+    level: "%5p [inv:%X{investigationId:-}]"

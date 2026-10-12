@@ -42,7 +42,7 @@ class GroundedAgentServiceTest {
                 executor,
                 answerGenerator).execute(
                         "Why is payment blocked?",
-                        List.of());
+                        List.of(new McpToolCandidate(SERVER_ID, "search_jira", "", "Search Jira", Map.of())));
 
         assertThat(result.execution().status())
                 .isEqualTo(AgentExecutionStatus.STOPPED);

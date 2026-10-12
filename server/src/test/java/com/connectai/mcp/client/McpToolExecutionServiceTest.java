@@ -149,7 +149,8 @@ class McpToolExecutionServiceTest {
                 () -> service.execute(serverId, "echo", new McpToolExecutionRequest(Map.of())));
 
         assertEquals(502, exception.getStatusCode().value());
-        assertTrue(exception.getReason().contains("MCP tool execution failed"));
+        assertTrue(exception.getReason().contains("MCP tool 'echo' failed"));
+        assertTrue(exception.getReason().contains("remote MCP failure"));
     }
 
     @Test

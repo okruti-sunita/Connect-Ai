@@ -1,0 +1,103 @@
+package com.connectai.service;
+
+import com.connectai.agent.AgentExecutionState;
+import com.connectai.agent.AgentToolCatalog;
+import com.connectai.agent.AnswerHints;
+import com.connectai.agent.ControlledAgentExecutor;
+import com.connectai.agent.GroundedAnswer;
+import com.connectai.agent.GroundedAnswerGenerator;
+import com.connectai.agent.McpToolCandidate;
+import com.connectai.agent.ToolShortlister;
+import com.connectai.mcp.entity.EMcpServer;
+import com.connectai.mcp.repository.McpServerRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+import org.springframework.stereotype.Component;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+/**
+ * Runs one dynamic investigation to a terminal state: catalog -> bounded agent loop
+ * (each step persisted as it finishes) -> grounded answer -> terminal status.
+ *
+ * {@link #run} never throws: any unexpected error is recorded as FAILED, so an
+ * investigation can never stay RUNNING because of an exception. Logs carry the
+ * investigation id (MDC key {@code investigationId}) as the correlation id.
+ */
+@Component
+public class InvestigationRunner {
+
+    private static final Logger log = LoggerFactory.getLogger(InvestigationRunner.class);
+
+    private final AgentToolCatalog toolCatalog;
+    private final ControlledAgentExecutor executor;
+    private final GroundedAnswerGenerator answerGenerator;
+    private final InvestigationStore store;
+    private final McpServerRepository servers;
+
+    public InvestigationRunner(
+            AgentToolCatalog toolCatalog,
+            ControlledAgentExecutor executor,
+            GroundedAnswerGenerator answerGenerator,
+            InvestigationStore store,
+            McpServerRepository servers) {
+        this.toolCatalog = toolCatalog;
+        this.executor = executor;
+        this.answerGenerator = answerGenerator;
+        this.store = store;
+        this.servers = servers;
+    }
+
+    public void run(UUID investigationId, String question) {
+        MDC.put("investigationId", investigationId.toString());
+        long started = System.nanoTime();
+        try {
+            List<McpToolCandidate> tools = toolCatalog.getAvailableTools();
+            log.info("Investigation run started: id={}, availableTools={}", investigationId, tools.size());
+
+            AgentExecutionState execution = executor.execute(
+                    question,
+                    tools,
+                    step -> store.appendStep(investigationId, step));
+
+            List<String> uncovered = ToolShortlister.topicCoverage(question, tools).uncoveredCapabilities();
+            if (!uncovered.isEmpty()) {
+                log.info("Question asks for data no connected tool provides: {}", uncovered);
+            }
+            Map<UUID, String> connections = serverNames(tools);
+            GroundedAnswer answer = answerGenerator.generate(execution, new AnswerHints(uncovered, connections));
+            store.complete(investigationId, execution, answer, connections);
+
+            log.info("Investigation run finished: id={}, executionStatus={}, grounded={}, fallbackUsed={}, elapsedMs={}",
+                    investigationId, execution.status(), answer.grounded(), answer.fallbackUsed(),
+                    (System.nanoTime() - started) / 1_000_000);
+        } catch (Throwable throwable) {
+            log.error("Investigation run crashed: id={}, cause={}", investigationId, throwable.toString(), throwable);
+            store.fail(investigationId, "Investigation failed: " + safeMessage(throwable));
+            if (throwable instanceof Error error && !(throwable instanceof StackOverflowError)) {
+                throw error;
+            }
+        } finally {
+            MDC.remove("investigationId");
+        }
+    }
+
+    private Map<UUID, String> serverNames(List<McpToolCandidate> tools) {
+        Map<UUID, String> names = new HashMap<>();
+        tools.stream().map(McpToolCandidate::serverId).distinct().forEach(id ->
+                servers.findById(id).map(EMcpServer::getName).ifPresent(name -> names.put(id, name)));
+        return names;
+    }
+
+    private static String safeMessage(Throwable throwable) {
+        String message = throwable.getMessage();
+        if (message == null || message.isBlank()) {
+            message = throwable.getClass().getSimpleName();
+        }
+        return message.length() > 500 ? message.substring(0, 500) + "..." : message;
+    }
+}

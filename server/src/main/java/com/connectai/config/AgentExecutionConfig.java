@@ -12,6 +12,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.time.Duration;
+
 /**
  * Spring wiring for the dynamic agent execution pipeline.
  *
@@ -34,9 +36,11 @@ public class AgentExecutionConfig {
             name = "connectai.llm.enabled",
             havingValue = "true")
     public DynamicToolPlanner llmDynamicToolPlanner(
-            LlmClient llmClient) {
+            LlmClient llmClient,
+            @Value("${connectai.agent.planner.shortlist-size:6}") int shortlistSize,
+            @Value("${connectai.agent.planner.max-attempts:3}") int maxAttempts) {
 
-        return new LlmMcpToolPlanner(llmClient);
+        return new LlmMcpToolPlanner(llmClient, shortlistSize, maxAttempts);
     }
 
     @Bean
@@ -60,11 +64,15 @@ public class AgentExecutionConfig {
     public ControlledAgentExecutor controlledAgentExecutor(
             DynamicToolPlanner planner,
             PlannedToolExecutor plannedToolExecutor,
-            @Value("${connectai.agent.max-steps:6}") int maxSteps) {
+            @Value("${connectai.agent.max-steps:6}") int maxSteps,
+            @Value("${connectai.agent.max-duration-seconds:600}") long maxDurationSeconds,
+            @Value("${connectai.agent.max-consecutive-failures:2}") int maxConsecutiveFailures) {
 
         return new ControlledAgentExecutor(
                 planner,
                 plannedToolExecutor,
-                maxSteps);
+                maxSteps,
+                Duration.ofSeconds(maxDurationSeconds),
+                maxConsecutiveFailures);
     }
 }

@@ -45,6 +45,9 @@ public class AgentConversation extends AbstractUUIDPersistable {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    @Column(name = "stop_reason", length = 1000)
+    private String stopReason;
+
     @OneToMany(mappedBy = "conversation", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
     @OrderBy("stepNumber ASC")
     private List<AgentExecutionStepRecord> steps = new ArrayList<>();
@@ -80,17 +83,23 @@ public class AgentConversation extends AbstractUUIDPersistable {
         this.grounded = groundedAnswer.grounded();
         this.fallbackUsed = groundedAnswer.fallbackUsed();
         this.completedAt = Instant.now();
+        this.stopReason = execution.stopReason() == null ? null
+                : execution.stopReason().substring(0, Math.min(execution.stopReason().length(), 1000));
         this.steps.clear();
         this.evidence.clear();
-        execution.steps().forEach(step -> this.steps.add(new AgentExecutionStepRecord(
-                this, step.stepNumber(), step.plan().toolName(), step.status())));
+        execution.steps().forEach(step -> this.steps.add(new AgentExecutionStepRecord(this, step)));
         groundedAnswer.evidence().forEach(item -> this.evidence.add(new AgentConversationEvidence(
                 this, item.citation(), item.stepNumber(), item.serverId(), item.toolName(), item.content())));
     }
 
     public void markFailed() {
+        markFailed("The request could not be completed.");
+    }
+
+    public void markFailed(String reason) {
         this.status = AgentExecutionStatus.FAILED;
-        this.answer = "The request could not be completed.";
+        this.answer = reason;
+        this.stopReason = reason == null ? null : reason.substring(0, Math.min(reason.length(), 1000));
         this.grounded = false;
         this.fallbackUsed = true;
         this.completedAt = Instant.now();
@@ -103,6 +112,7 @@ public class AgentConversation extends AbstractUUIDPersistable {
     public boolean isFallbackUsed() { return fallbackUsed; }
     public Instant getCreatedAt() { return createdAt; }
     public Instant getCompletedAt() { return completedAt; }
+    public String getStopReason() { return stopReason; }
     public List<AgentExecutionStepRecord> getSteps() { return List.copyOf(steps); }
     public List<AgentConversationEvidence> getEvidence() { return List.copyOf(evidence); }
 }

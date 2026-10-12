@@ -27,7 +27,7 @@ function hostOf(endpoint: string): string {
 
 const ToolDetailPage = ({tool, busy, onBack, onConnect, onDisconnect}: ToolDetailPageProps) => {
     const item = findCatalogItem(tool.name);
-    const connected = tool.status === 'CONNECTED';
+    const connected = tool.runtimeConnected;
     const [items, setItems] = useState<CapabilityDetail[] | null>(null);
     const [ms, setMs] = useState<number | null>(null);
     const [failed, setFailed] = useState(false);
@@ -115,8 +115,8 @@ const ToolDetailPage = ({tool, busy, onBack, onConnect, onDisconnect}: ToolDetai
                 </div>
             </header>
 
-            {tool.status === 'FAILED' && (
-                <p className="inline-alert" role="alert">The last connection attempt failed. Check the endpoint and token, then reconnect.</p>
+            {!connected && tool.lastError && (
+                <p className="inline-alert" role="alert">{tool.lastError}</p>
             )}
 
             <div className="info-tiles">

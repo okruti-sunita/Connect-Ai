@@ -16,10 +16,22 @@ public record McpServer(
         String lastError,
         OffsetDateTime lastConnectedAt,
         OffsetDateTime createdAt,
-        OffsetDateTime updatedAt
+        OffsetDateTime updatedAt,
+        boolean runtimeConnected,
+        boolean secretConfigured,
+        /** OAuth provider id for authType OAUTH; null otherwise. secretConfigured then means "signed in". */
+        String oauthProvider
 ) {
 
     public static McpServer from(EMcpServer entity) {
+        return from(entity, false);
+    }
+
+    /**
+     * {@code runtimeConnected} is the live truth (a handshaken session exists in this process);
+     * {@code status} is the persisted lifecycle state. The secret itself is never exposed.
+     */
+    public static McpServer from(EMcpServer entity, boolean runtimeConnected) {
         return new McpServer(
                 entity.getId(),
                 entity.getName(),
@@ -30,8 +42,11 @@ public record McpServer(
                 entity.getStatus(),
                 entity.getLastError(),
                 entity.getLastConnectedAt(),
+                entity.getCreatedAt(),
                 entity.getUpdatedAt(),
-                entity.getCreatedAt()
+                runtimeConnected,
+                entity.getEncryptedSecret() != null && !entity.getEncryptedSecret().isBlank(),
+                entity.getOauthProvider()
         );
     }
 }

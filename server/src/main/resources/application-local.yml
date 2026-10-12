@@ -3,12 +3,15 @@
 connectai:
   tools:
     mode: mcp
+  mcp:
+    # Re-establish the connections that were live before a restart (real handshake, errors shown).
+    reconnect-on-startup: ${CONNECTAI_MCP_RECONNECT_ON_STARTUP:true}
   llm:
-    enabled: true
-    provider: ollama
-    ollama-base-url: http://localhost:11434
-    ollama-model: qwen3:1.7b
-    timeout-seconds: 180
+    enabled: ${CONNECTAI_LLM_ENABLED:true}
+    provider: ${CONNECTAI_LLM_PROVIDER:ollama}
+    ollama-base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+    ollama-model: ${OLLAMA_MODEL:qwen3:1.7b}
+    timeout-seconds: ${CONNECTAI_LLM_TIMEOUT_SECONDS:180}
 
 logging:
   level:

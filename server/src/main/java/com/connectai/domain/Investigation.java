@@ -39,6 +39,13 @@ public class Investigation extends AbstractUUIDPersistable {
     @Column(nullable = false)
     private boolean archived;
 
+    /** Why the agent stopped: user-safe text, null while running. */
+    @Column(name = "stop_reason", length = 1000)
+    private String stopReason;
+
+    @Column(name = "completed_at")
+    private Instant completedAt;
+
     @OneToMany(
             mappedBy = "investigation",
             cascade = CascadeType.ALL,
@@ -72,13 +79,40 @@ public class Investigation extends AbstractUUIDPersistable {
     }
 
     public void markAnswered(String answer) {
-        this.resolvedAnswer = answer;
-        this.status = InvestigationStatus.ANSWERED;
+        finish(InvestigationStatus.ANSWERED, answer, null);
     }
 
     public void markFailed(String reason) {
-        this.resolvedAnswer = reason;
-        this.status = InvestigationStatus.FAILED;
+        finish(InvestigationStatus.FAILED, reason, reason);
+    }
+
+    /** Moves the investigation to a terminal state. */
+    public void finish(InvestigationStatus terminalStatus, String answer, String reason) {
+        if (terminalStatus == null || !terminalStatus.isTerminal()) {
+            throw new IllegalArgumentException("terminal status required");
+        }
+        this.status = terminalStatus;
+        this.resolvedAnswer = answer == null ? null : truncate(answer, 8000);
+        this.stopReason = reason == null ? null : truncate(reason, 1000);
+        this.completedAt = Instant.now();
+    }
+
+    public boolean isRunning() {
+        return status == InvestigationStatus.RUNNING;
+    }
+
+    public void replaceSteps(List<InvestigationStep> newSteps) {
+        steps.clear();
+        newSteps.forEach(this::addStep);
+    }
+
+    public void replaceEvidence(List<EvidenceItem> newEvidence) {
+        evidenceItems.clear();
+        newEvidence.forEach(this::addEvidence);
+    }
+
+    private static String truncate(String value, int max) {
+        return value.length() <= max ? value : value.substring(0, max - 3) + "...";
     }
 
     public void archive() {
