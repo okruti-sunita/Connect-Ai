@@ -50,6 +50,10 @@ public class Investigation extends AbstractUUIDPersistable {
     @Column(length = 20)
     private String route;
 
+    /** Why this route was taken: what the fast path recognised, or why it handed over to the AI. */
+    @Column(name = "route_detail", length = 1000)
+    private String routeDetail;
+
     @OneToMany(
             mappedBy = "investigation",
             cascade = CascadeType.ALL,
@@ -103,6 +107,11 @@ public class Investigation extends AbstractUUIDPersistable {
 
     public void answeredBy(String route) {
         this.route = route;
+    }
+
+    public void answeredBy(String route, String detail) {
+        this.route = route;
+        this.routeDetail = detail == null ? null : truncate(detail, 1000);
     }
 
     public boolean isRunning() {

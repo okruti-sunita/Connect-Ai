@@ -201,6 +201,23 @@ class GenericFastPathTest {
     }
 
     @Test
+    void declinesExplainWhy() {
+        FastPathEngine engine = new FastPathEngine(new PlannedToolExecutor(r -> {
+            throw new AssertionError("no call expected");
+        }), new GroundedAnswerContextBuilder());
+        FastPathEngine.AnswerFallback none = execution -> null;
+
+        assertThat(engine.decide("list comments", LINEAR_TOOLS, s -> { }, none).explanation())
+                .contains("list_comments needs \"issueNumber\"");
+        assertThat(engine.decide("list closed projects", JIRA_TOOLS, s -> { }, none).explanation())
+                .contains("has no filter for \"closed\"");
+        assertThat(engine.decide("list deployments", JIRA_TOOLS, s -> { }, none).explanation())
+                .contains("No connected tool is named after \"deployments\"");
+        assertThat(engine.decide("show my open issues", JIRA_TOOLS, s -> { }, none).explanation())
+                .contains("search_issues needs \"jql\"");
+    }
+
+    @Test
     void emptyListIsANone() {
         var result = ask("list channels", SLACK_TOOLS, r -> "[]").orElseThrow();
         assertThat(result.answer().answer()).startsWith("No channels found");

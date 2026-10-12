@@ -448,4 +448,10 @@
         </addColumn>
     </changeSet>
 
+    <changeSet id="011-investigation-route-detail" author="connect-ai">
+        <addColumn tableName="investigation">
+            <column name="route_detail" type="varchar(1000)"/>
+        </addColumn>
+    </changeSet>
+
 </databaseChangeLog>

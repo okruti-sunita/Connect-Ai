@@ -60,17 +60,36 @@ public class FastPathEngine {
         this.contextBuilder = contextBuilder;
     }
 
+    /** The fast path's result (empty: use the AI agent) and a one-line explanation of the routing. */
+    public record Decision(Optional<Result> result, String explanation) {
+    }
+
     public Optional<Result> run(String question, List<McpToolCandidate> tools,
                                 AgentExecutionListener listener, AnswerFallback fallback) {
+        return decide(question, tools, listener, fallback).result();
+    }
+
+    public Decision decide(String question, List<McpToolCandidate> tools,
+                           AgentExecutionListener listener, AnswerFallback fallback) {
         if (tools == null || tools.isEmpty()) {
-            return Optional.empty();
+            return new Decision(Optional.empty(), "No connected tools, so there is nothing to run.");
+        }
+        String judgement = IntentParser.reasoningWord(question);
+        if (judgement != null) {
+            return new Decision(Optional.empty(), "The question needs judgement (\"" + judgement
+                    + "\"), so the AI agent plans it; templates only answer factual lookups.");
         }
         // 1. Recipes for well-known tool conventions (e.g. GitHub search qualifiers).
         Optional<ParsedQuestion> parsed = IntentParser.parse(question);
         Optional<List<Call>> recipe = parsed.flatMap(intent -> recipe(intent, tools));
         if (recipe.isEmpty()) {
             // 2. Generic: match any MCP server's tools by name and schema.
-            return runGeneric(question, tools, listener, fallback);
+            Decision generic = runGeneric(question, tools, listener, fallback);
+            if (generic.result().isEmpty() && parsed.isPresent()) {
+                return new Decision(Optional.empty(), "Recognised " + parsed.get().intent()
+                        + " but the connected tools cannot serve its recipe; " + lowerFirst(generic.explanation()));
+            }
+            return generic;
         }
         ParsedQuestion intent = parsed.get();
         log.info("Fast path: intent={}, owner={}, repo={}, state={}, limit={}",
@@ -82,7 +101,15 @@ public class FastPathEngine {
                 break;
             }
         }
-        return Optional.of(finish(intent, run, fallback));
+        String explanation = "Recognised " + intent.intent()
+                + (intent.owner() == null ? "" : " for " + intent.owner() + "/" + intent.repo())
+                + (intent.state() == null ? "" : ", state " + intent.state())
+                + (intent.limit() == null ? "" : ", last " + intent.limit())
+                + " → fixed recipe: " + recipe.get().stream().map(c -> c.tool().toolName()).distinct()
+                .collect(java.util.stream.Collectors.joining(" → "))
+                + (recipe.get().stream().anyMatch(Call::dependsOnLogin) ? ", each scoped to that connection's login" : "")
+                + ". Answer written from the tool output by a template.";
+        return new Decision(Optional.of(finish(intent, run, fallback)), explanation);
     }
 
     // ---------------------------------------------------------------- recipes
@@ -212,11 +239,12 @@ public class FastPathEngine {
 
     // ---------------------------------------------------------------- generic (any MCP server)
 
-    private Optional<Result> runGeneric(String question, List<McpToolCandidate> tools,
-                                        AgentExecutionListener listener, AnswerFallback fallback) {
+    private Decision runGeneric(String question, List<McpToolCandidate> tools,
+                                AgentExecutionListener listener, AnswerFallback fallback) {
         Optional<GenericQuery> parsed = GenericQuery.parse(question);
         if (parsed.isEmpty()) {
-            return Optional.empty();
+            return new Decision(Optional.empty(),
+                    "Not a recognised lookup (identity, list, or one item by reference), so the AI agent plans it.");
         }
         GenericQuery query = parsed.get();
         List<Call> calls = new ArrayList<>();
@@ -224,14 +252,17 @@ public class FastPathEngine {
 
         if (query.kind() == GenericQuery.Kind.IDENTITY) {
             List<McpToolCandidate> identities = GenericToolMatcher.identityTools(tools);
-            if (identities.isEmpty()) return Optional.empty();
+            if (identities.isEmpty()) {
+                return new Decision(Optional.empty(), "No connected tool returns the signed-in user, so the AI agent plans it.");
+            }
             identities.forEach(me -> calls.add(Call.fixed(me, Map.of(), "Identity of the account on " + label(me) + ".")));
             label = "GENERIC_IDENTITY";
         } else {
-            Optional<GenericToolMatcher.Match> match = GenericToolMatcher.match(query, tools);
+            GenericToolMatcher.MatchResult explained = GenericToolMatcher.explain(query, tools);
+            Optional<GenericToolMatcher.Match> match = explained.match();
             if (match.isEmpty()) {
-                log.info("Generic fast path: no tool clearly matches {} {}; using the AI agent", query.kind(), query.entityWords());
-                return Optional.empty();
+                log.info("Generic fast path: no tool clearly matches {} {}: {}", query.kind(), query.entityWords(), explained.reason());
+                return new Decision(Optional.empty(), explained.reason() + " The AI agent plans it instead.");
             }
             GenericToolMatcher.Match m = match.get();
             label = "GENERIC_" + query.kind() + ": " + m.tool().toolName();
@@ -251,7 +282,10 @@ public class FastPathEngine {
                         }, m.loginIsId()));
                     });
                 }
-                if (calls.isEmpty()) return Optional.empty();
+                if (calls.isEmpty()) {
+                    return new Decision(Optional.empty(), "\"My\" needs an identity tool on the connection of "
+                            + m.tool().toolName() + ", and there is none.");
+                }
             } else {
                 calls.add(Call.fixed(m.tool(), m.arguments(), reason));
             }
@@ -260,7 +294,25 @@ public class FastPathEngine {
         log.info("Generic fast path: {} ({} call(s))", label, calls.size());
         Run run = new Run(question, listener);
         calls.forEach(run::execute);
-        return Optional.of(finishGeneric(query, label, run, fallback));
+        return new Decision(Optional.of(finishGeneric(query, label, run, fallback)), explainGeneric(query, tools, calls));
+    }
+
+    private static String explainGeneric(GenericQuery query, List<McpToolCandidate> tools, List<Call> calls) {
+        if (query.kind() == GenericQuery.Kind.IDENTITY) {
+            return "Recognised IDENTITY → identity tool on each connection ("
+                    + calls.stream().map(c -> c.tool().toolName()).distinct().collect(java.util.stream.Collectors.joining(", "))
+                    + "). Answer written from the tool output by a template.";
+        }
+        Optional<GenericToolMatcher.Match> match = GenericToolMatcher.match(query, tools);
+        String arguments = match.map(m -> m.sources().entrySet().stream()
+                .map(e -> e.getKey() + " ← " + e.getValue()).collect(java.util.stream.Collectors.joining("; "))).orElse("");
+        return "Recognised " + query.kind() + " of \"" + String.join(" ", query.entityWords()) + "\" → tool "
+                + match.map(m -> m.tool().toolName()).orElse("?") + " (matched by name and input schema, works for any MCP server)"
+                + (arguments.isEmpty() ? "" : "; arguments: " + arguments) + ". Answer written from the tool output by a template.";
+    }
+
+    private static String lowerFirst(String text) {
+        return text == null || text.isEmpty() ? "" : Character.toLowerCase(text.charAt(0)) + text.substring(1);
     }
 
     private Result finishGeneric(GenericQuery query, String label, Run run, AnswerFallback fallback) {

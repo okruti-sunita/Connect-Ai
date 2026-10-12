@@ -854,3 +854,13 @@ $muted: #64748b;
     }
   }
 }
+
+.inv-page .route-why {
+  margin-top: 6px;
+  font-size: 13px;
+  max-width: 760px;
+
+  summary { cursor: pointer; opacity: 0.8; }
+  summary:hover { opacity: 1; }
+  p { margin: 6px 0 0; padding: 8px 10px; border-radius: 6px; background: rgba(127, 127, 127, 0.1); overflow-wrap: anywhere; }
+}

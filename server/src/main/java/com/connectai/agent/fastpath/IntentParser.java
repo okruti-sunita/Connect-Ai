@@ -33,10 +33,13 @@ public final class IntentParser {
     }
 
     /** Questions that need reasoning, ranking or interpretation are never answered by a template. */
+    // Judgement, ranking, causation and time windows. Failure words stay here too: no tool filter can
+    // be assumed to express "failed", so those go to the agent (and its topic gate).
+    // Nouns like "deployments" or "incidents" are lookups, not judgement, and are not listed.
     private static final Pattern NEEDS_REASONING = Pattern.compile(
             "\\b(why|how come|explain|cause[sd]?|root|compare|comparison|versus|vs\\.?|most|least|best|worst|"
-                    + "should|recommend|summari[sz]e|analy[sz]e|trend|fail(ure|ures|ed|ing)?|broken|incident|"
-                    + "deploy(ment|ed)?s?|risk|impact|related|similar|before|after|since|between|which of)\\b");
+                    + "should|recommend|summari[sz]e|analy[sz]e|trend|fail(ure|ures|ed|ing)?|broken|"
+                    + "risk|impact|related|similar|before|after|since|between|which of)\\b");
 
     private static final Pattern OWNER_REPO = Pattern.compile(
             "(?<![\\w./-])([A-Za-z0-9][A-Za-z0-9-]{0,38})/([A-Za-z0-9._-]{1,100})(?![\\w/])");
@@ -59,6 +62,13 @@ public final class IntentParser {
     /** True when the question needs reasoning, ranking or interpretation (never answered by a template). */
     public static boolean needsReasoning(String question) {
         return question == null || NEEDS_REASONING.matcher(question.toLowerCase(Locale.ROOT)).find();
+    }
+
+    /** The word that makes a question need judgement ("why", "most"...), or null. */
+    public static String reasoningWord(String question) {
+        if (question == null) return null;
+        Matcher matcher = NEEDS_REASONING.matcher(question.toLowerCase(Locale.ROOT));
+        return matcher.find() ? matcher.group() : null;
     }
 
     public static Optional<ParsedQuestion> parse(String question) {

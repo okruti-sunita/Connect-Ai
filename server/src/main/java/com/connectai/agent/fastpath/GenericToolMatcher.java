@@ -22,8 +22,9 @@ import java.util.Set;
 public final class GenericToolMatcher {
 
     /** A chosen tool. {@code loginParameter} is set when the call needs the user's login first. */
+    /** {@code sources}: for each filled parameter, where its value came from (for "why this route"). */
     public record Match(McpToolCandidate tool, Map<String, Object> arguments, String entityLabel,
-                        String loginParameter, boolean loginIsId) {
+                        String loginParameter, boolean loginIsId, Map<String, String> sources) {
     }
 
     private static final Set<String> LIST_VERBS = Set.of("list", "search", "get", "find", "query", "fetch", "read", "browse");
@@ -88,8 +89,17 @@ public final class GenericToolMatcher {
                 || description.contains("currently authenticated") || description.contains("signed-in user");
     }
 
+    /** The chosen tool, or why none was chosen (shown to the user as "why this route"). */
+    public record MatchResult(Optional<Match> match, String reason) { }
+
     public static Optional<Match> match(GenericQuery query, List<McpToolCandidate> tools) {
+        return explain(query, tools).match();
+    }
+
+    public static MatchResult explain(GenericQuery query, List<McpToolCandidate> tools) {
         record Scored(Match match, int score) { }
+        List<String> rejections = new ArrayList<>();
+        boolean anyNamed = false;
         List<Scored> scored = new ArrayList<>();
         Set<String> direct = new java.util.HashSet<>();
         query.entityWords().forEach(word -> direct.add(singular(word)));
@@ -102,6 +112,7 @@ public final class GenericToolMatcher {
             String entity = entityTokens.stream().filter(t -> wanted.contains(singular(t))).findFirst()
                     .orElse(anyEntity && !entityTokens.isEmpty() ? entityTokens.get(entityTokens.size() - 1) : null);
             if (entity == null) continue;
+            anyNamed = true;
 
             int score = direct.contains(singular(entity)) ? 3 : anyEntity ? 1 : 2; // exact word beats synonym
             boolean plural = !singular(entity).equals(entity);
@@ -118,26 +129,40 @@ public final class GenericToolMatcher {
                 continue;
             }
 
-            Optional<Match> filled = fill(query, tool, entityTokens);
+            Optional<Match> filled = fill(query, tool, entityTokens, rejections);
             if (filled.isEmpty()) continue;
             score += filled.get().arguments().size(); // more of the question's values used = better fit
             scored.add(new Scored(filled.get(), score));
         }
 
         scored.sort(Comparator.comparingInt(Scored::score).reversed());
-        if (scored.isEmpty()) return Optional.empty();
+        if (scored.isEmpty()) {
+            String words = String.join(", ", query.entityWords());
+            if (!anyNamed) {
+                return new MatchResult(Optional.empty(), "No connected tool is named after \"" + words + "\".");
+            }
+            return new MatchResult(Optional.empty(), rejections.isEmpty()
+                    ? "No tool for \"" + words + "\" supports this kind of question."
+                    : String.join(" ", rejections.stream().distinct().limit(3).toList()));
+        }
         Scored best = scored.get(0);
-        boolean tie = scored.stream().skip(1)
-                .anyMatch(other -> other.score() == best.score() && !other.match().tool().toolName().equals(best.match().tool().toolName()));
-        return tie ? Optional.empty() : Optional.of(best.match());
+        Optional<Scored> tie = scored.stream().skip(1)
+                .filter(other -> other.score() == best.score() && !other.match().tool().toolName().equals(best.match().tool().toolName()))
+                .findFirst();
+        if (tie.isPresent()) {
+            return new MatchResult(Optional.empty(), "Two tools fit equally well (" + best.match().tool().toolName() + ", "
+                    + tie.get().match().tool().toolName() + "), so the fast path does not guess.");
+        }
+        return new MatchResult(Optional.of(best.match()), null);
     }
 
     @SuppressWarnings("unchecked")
-    private static Optional<Match> fill(GenericQuery q, McpToolCandidate tool, List<String> entityTokens) {
+    private static Optional<Match> fill(GenericQuery q, McpToolCandidate tool, List<String> entityTokens, List<String> rejections) {
         Map<String, Object> properties = tool.inputSchema().get("properties") instanceof Map<?, ?> map
                 ? (Map<String, Object>) map : Map.of();
         List<String> required = required(tool);
         Map<String, Object> args = new LinkedHashMap<>();
+        Map<String, String> sources = new LinkedHashMap<>();
         String loginParameter = null;
         boolean loginIsId = false;
         boolean usedState = false;
@@ -160,7 +185,10 @@ public final class GenericToolMatcher {
             else if (CHANNEL_PARAMS.contains(normalized)) value = q.channel();
             else if (STATE_PARAMS.contains(normalized) && q.state() != null) {
                 value = enumValue(schema, q.state()).orElse(null);
-                if (value == null) return Optional.empty(); // a filter was asked for that this tool cannot apply
+                if (value == null) { // a filter was asked for that this tool cannot apply
+                    rejections.add(tool.toolName() + " has no \"" + q.state() + "\" filter.");
+                    return Optional.empty();
+                }
                 usedState = true;
             } else if (LIMIT_PARAMS.contains(normalized)) {
                 value = q.limit() != null ? (Object) (long) q.limit() : isRequired ? 20L : null;
@@ -172,18 +200,41 @@ public final class GenericToolMatcher {
 
             if (value != null) {
                 args.put(name, typed(schema, value));
-            } else if (isRequired) {
-                return Optional.empty(); // a required parameter the question gives no value for
+            } else if (isRequired) { // a required parameter the question gives no value for
+                rejections.add(tool.toolName() + " needs \"" + name + "\", which the question does not give.");
+                return Optional.empty();
+            }
+            if (value != null) {
+                sources.put(name, source(normalized));
             }
         }
 
-        if (q.state() != null && !usedState) return Optional.empty();
+        if (q.state() != null && !usedState) {
+            rejections.add(tool.toolName() + " has no filter for \"" + q.state() + "\".");
+            return Optional.empty();
+        }
         if (q.kind() == GenericQuery.Kind.GET && q.itemKey() == null && q.itemNumber() == null) return Optional.empty();
-        if (q.firstPerson() && loginParameter == null && !personal(tool)) {
-            return Optional.empty(); // "my ..." but nothing scopes the call to the user
+        if (q.firstPerson() && loginParameter == null && !personal(tool)) { // "my ..." but nothing scopes the call
+            rejections.add("\"My\" cannot be scoped to your account with " + tool.toolName() + " (no user parameter).");
+            return Optional.empty();
+        }
+        if (loginParameter != null) {
+            sources.put(loginParameter, "your " + (loginIsId ? "user id" : "login") + " from the identity tool");
         }
         String label = String.join(" ", entityTokens).replace('_', ' ');
-        return Optional.of(new Match(tool, args, label, loginParameter, loginIsId));
+        return Optional.of(new Match(tool, args, label, loginParameter, loginIsId, sources));
+    }
+
+    private static String source(String normalizedParameter) {
+        if (OWNER_PARAMS.contains(normalizedParameter) || REPO_PARAMS.contains(normalizedParameter)) return "owner/repo in the question";
+        if (PROJECT_PARAMS.contains(normalizedParameter)) return "project in the question";
+        if (KEY_PARAMS.contains(normalizedParameter) || NUMBER_PARAMS.contains(normalizedParameter)
+                || ID_PARAMS.contains(normalizedParameter)) return "item reference in the question";
+        if (TEXT_PARAMS.contains(normalizedParameter)) return "quoted text in the question";
+        if (CHANNEL_PARAMS.contains(normalizedParameter)) return "#channel in the question";
+        if (STATE_PARAMS.contains(normalizedParameter)) return "state in the question";
+        if (LIMIT_PARAMS.contains(normalizedParameter)) return "count in the question";
+        return "the question";
     }
 
     /** Tools that are inherently about the signed-in user ("list my notifications", "assigned to you"). */

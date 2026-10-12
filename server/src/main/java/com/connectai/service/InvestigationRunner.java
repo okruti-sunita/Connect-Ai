@@ -67,11 +67,15 @@ public class InvestigationRunner {
 
             // Hybrid routing: recognised questions are answered by a deterministic recipe with no model
             // call; everything else goes to the AI agent.
+            String routeDetail = "Fast path disabled; the AI agent plans every question.";
             if (fastPath != null) {
-                var fast = fastPath.run(question, tools, step -> store.appendStep(investigationId, step),
+                var decision = fastPath.decide(question, tools, step -> store.appendStep(investigationId, step),
                         execution -> answerGenerator.generate(execution, new AnswerHints(List.of(), connections)));
+                routeDetail = decision.explanation();
+                var fast = decision.result();
                 if (fast.isPresent()) {
-                    store.complete(investigationId, fast.get().execution(), fast.get().answer(), connections, "FAST_PATH");
+                    store.complete(investigationId, fast.get().execution(), fast.get().answer(), connections,
+                            "FAST_PATH", routeDetail);
                     log.info("Investigation answered by the fast path: id={}, intent={}, templateAnswer={}, elapsedMs={}",
                             investigationId, fast.get().intent(), fast.get().templateAnswer(),
                             (System.nanoTime() - started) / 1_000_000);
@@ -89,7 +93,7 @@ public class InvestigationRunner {
                 log.info("Question asks for data no connected tool provides: {}", uncovered);
             }
             GroundedAnswer answer = answerGenerator.generate(execution, new AnswerHints(uncovered, connections));
-            store.complete(investigationId, execution, answer, connections, "AI_AGENT");
+            store.complete(investigationId, execution, answer, connections, "AI_AGENT", routeDetail);
 
             log.info("Investigation run finished: id={}, executionStatus={}, grounded={}, fallbackUsed={}, elapsedMs={}",
                     investigationId, execution.status(), answer.grounded(), answer.fallbackUsed(),

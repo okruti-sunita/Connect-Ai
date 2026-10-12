@@ -80,6 +80,7 @@ interface ApiInvestigation {
     resolvedAnswer: string | null;
     stopReason: string | null;
     route: string | null;
+    routeDetail: string | null;
     createdAt: string;
     completedAt: string | null;
     evidence: ApiEvidence[];
@@ -247,6 +248,7 @@ export const getInvestigation = async (id: string): Promise<InvestigationDetailD
         completedAgo: res.completedAt ? timeAgo(res.completedAt) : null,
         stopReason: res.stopReason,
         route: res.route,
+        routeDetail: res.routeDetail,
         durationSeconds: res.completedAt
             ? Math.max(0, (new Date(res.completedAt).getTime() - new Date(res.createdAt).getTime()) / 1000)
             : null,

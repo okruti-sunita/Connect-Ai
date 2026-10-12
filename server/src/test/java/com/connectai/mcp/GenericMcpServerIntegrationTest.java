@@ -94,6 +94,8 @@ class GenericMcpServerIntegrationTest {
         Map<String, Object> result = investigate("list the last 2 open tickets");
 
         assertThat(result).containsEntry("status", "ANSWERED").containsEntry("route", "FAST_PATH");
+        assertThat(result.get("routeDetail").toString()).contains("tool list_tickets")
+                .contains("state ← state in the question").contains("limit ← count in the question");
         assertThat(LAST_LIST_ARGS.get()).containsEntry("state", "open").containsEntry("limit", 2);
         assertThat(result.get("resolvedAnswer").toString())
                 .contains("`OPS-7` Disk almost full on db-1").contains("open").contains("sre-oncall");
@@ -117,6 +119,7 @@ class GenericMcpServerIntegrationTest {
     void questionsNeedingJudgementAreNotFastPathed() {
         Map<String, Object> result = investigate("why do tickets keep piling up");
         assertThat(result.get("route")).isNotEqualTo("FAST_PATH");
+        assertThat(result.get("routeDetail").toString()).contains("needs judgement").contains("why");
     }
 
     @AfterAll

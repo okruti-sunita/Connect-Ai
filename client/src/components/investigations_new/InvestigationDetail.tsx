@@ -120,6 +120,12 @@ const InvestigationDetail = ({ id, onBack }: Props) => {
                                 {data.route === 'FAST_PATH' && <> · no AI model call</>}
                             </span>
                         )}
+                        {data.routeDetail && (
+                            <details className="route-why">
+                                <summary>Why this route?</summary>
+                                <p>{data.routeDetail}</p>
+                            </details>
+                        )}
                     </div>
                 </div>
 

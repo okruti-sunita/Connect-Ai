@@ -25,6 +25,8 @@ public record InvestigationResponse(
         String stopReason,
         /** FAST_PATH or AI_AGENT; null while running. */
         String route,
+        /** Why this route was taken (what the fast path recognised, or why the AI planned it). */
+        String routeDetail,
         Instant createdAt,
         Instant completedAt,
         List<EvidenceResponse> evidence,
@@ -75,6 +77,7 @@ public record InvestigationResponse(
                 i.getResolvedAnswer(),
                 i.getStopReason(),
                 i.getRoute(),
+                i.getRouteDetail(),
                 i.getCreatedAt(),
                 i.getCompletedAt(),
                 evidence,

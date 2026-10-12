@@ -88,6 +88,8 @@ export interface InvestigationDetailData {
     stopReason: string | null;
     /** FAST_PATH or AI_AGENT; null while running. */
     route: string | null;
+    /** Why that route was taken: what was recognised, or why the AI planned it. */
+    routeDetail: string | null;
     /** Wall-clock seconds from submission to completion; null while running. */
     durationSeconds: number | null;
     tags: InvestigationTag[];
