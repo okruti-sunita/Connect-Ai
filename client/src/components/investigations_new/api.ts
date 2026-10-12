@@ -35,6 +35,7 @@ interface ApiSummary {
     sources: string[];
     evidenceCount: number;
     createdAt: string;
+    route: string | null;
 }
 
 interface ApiPage<T> {
@@ -78,6 +79,7 @@ interface ApiInvestigation {
     archived: boolean;
     resolvedAnswer: string | null;
     stopReason: string | null;
+    route: string | null;
     createdAt: string;
     completedAt: string | null;
     evidence: ApiEvidence[];
@@ -148,7 +150,8 @@ const toSummary = (s: ApiSummary): InvestigationSummary => ({
     title: s.title,
     status: toStatus(s.status, s.archived),
     sources: uniqueSources(s.sources),
-    updatedAgo: timeAgo(s.createdAt)
+    updatedAgo: timeAgo(s.createdAt),
+    route: s.route
 });
 
 const toEvidence = (e: ApiEvidence): EvidenceItem => {
@@ -243,6 +246,10 @@ export const getInvestigation = async (id: string): Promise<InvestigationDetailD
         startedAgo: timeAgo(res.createdAt),
         completedAgo: res.completedAt ? timeAgo(res.completedAt) : null,
         stopReason: res.stopReason,
+        route: res.route,
+        durationSeconds: res.completedAt
+            ? Math.max(0, (new Date(res.completedAt).getTime() - new Date(res.createdAt).getTime()) / 1000)
+            : null,
         tags: [], // entity extraction (ticket keys, PR numbers) comes with a later server step
         steps: (res.steps ?? []).map((s) => toStep(s, sourceByStep.get(s.stepNumber) ?? "mcp")),
         evidence,

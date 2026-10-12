@@ -1,0 +1,367 @@
+package com.connectai.agent.fastpath;
+
+import com.connectai.agent.AgentExecutionListener;
+import com.connectai.agent.AgentExecutionState;
+import com.connectai.agent.AgentExecutionStatus;
+import com.connectai.agent.AgentExecutionStep;
+import com.connectai.agent.AgentStepStatus;
+import com.connectai.agent.GroundedAnswer;
+import com.connectai.agent.GroundedAnswerContext;
+import com.connectai.agent.GroundedAnswerContextBuilder;
+import com.connectai.agent.GroundedEvidence;
+import com.connectai.agent.McpToolCandidate;
+import com.connectai.agent.PlannedToolExecutor;
+import com.connectai.agent.ToolExecutionContent;
+import com.connectai.agent.ToolSelectionPlan;
+import com.connectai.agent.fastpath.IntentParser.Intent;
+import com.connectai.agent.fastpath.IntentParser.ParsedQuestion;
+import com.fasterxml.jackson.databind.JsonNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+
+/**
+ * Answers recognised questions without any model call: {@link IntentParser} -> a fixed recipe
+ * of read-only tool calls (run through the normal validated executor, so steps and evidence are
+ * recorded exactly like an agent run) -> {@link AnswerTemplates}.
+ *
+ * Returns empty when the question is not recognised or the connected tools cannot serve the
+ * recipe; the caller then runs the AI agent. Recipes for "my ..." questions run on every
+ * connection that has the tools, each scoped to that connection's own login.
+ */
+public class FastPathEngine {
+
+    private static final Logger log = LoggerFactory.getLogger(FastPathEngine.class);
+
+    public record Result(AgentExecutionState execution, GroundedAnswer answer, Intent intent, boolean templateAnswer) {
+    }
+
+    /** Writes the answer when a template could not read the tool output. */
+    @FunctionalInterface
+    public interface AnswerFallback {
+        GroundedAnswer generate(AgentExecutionState execution);
+    }
+
+    private final PlannedToolExecutor executor;
+    private final GroundedAnswerContextBuilder contextBuilder;
+
+    public FastPathEngine(PlannedToolExecutor executor, GroundedAnswerContextBuilder contextBuilder) {
+        this.executor = executor;
+        this.contextBuilder = contextBuilder;
+    }
+
+    public Optional<Result> run(String question, List<McpToolCandidate> tools,
+                                AgentExecutionListener listener, AnswerFallback fallback) {
+        Optional<ParsedQuestion> parsed = IntentParser.parse(question);
+        if (parsed.isEmpty() || tools == null || tools.isEmpty()) {
+            return Optional.empty();
+        }
+        ParsedQuestion intent = parsed.get();
+        Optional<List<Call>> recipe = recipe(intent, tools);
+        if (recipe.isEmpty()) {
+            log.info("Fast path recognised {} but the connected tools cannot serve it; using the AI agent", intent.intent());
+            return Optional.empty();
+        }
+        log.info("Fast path: intent={}, owner={}, repo={}, state={}, limit={}",
+                intent.intent(), intent.owner(), intent.repo(), intent.state(), intent.limit());
+
+        Run run = new Run(question, listener);
+        for (Call call : recipe.get()) {
+            if (!run.execute(call)) {
+                break;
+            }
+        }
+        return Optional.of(finish(intent, run, fallback));
+    }
+
+    // ---------------------------------------------------------------- recipes
+
+    /** One planned call. {@code dependsOnLogin}: arguments are built after the identity call on that connection. */
+    private record Call(McpToolCandidate tool, Map<String, Object> arguments, String reason, boolean dependsOnLogin,
+                        java.util.function.Function<String, Map<String, Object>> withLogin) {
+        static Call fixed(McpToolCandidate tool, Map<String, Object> arguments, String reason) {
+            return new Call(tool, arguments, reason, false, null);
+        }
+
+        static Call afterLogin(McpToolCandidate tool, java.util.function.Function<String, Map<String, Object>> withLogin, String reason) {
+            return new Call(tool, Map.of(), reason, true, withLogin);
+        }
+    }
+
+    private Optional<List<Call>> recipe(ParsedQuestion q, List<McpToolCandidate> tools) {
+        List<Call> calls = new ArrayList<>();
+        switch (q.intent()) {
+            case WHO_AM_I -> named(tools, "get_me").forEach(me ->
+                    calls.add(Call.fixed(me, Map.of(), "Identity of the account on " + label(me) + ".")));
+            case MY_REPOS -> perConnection(tools, "search_repositories").forEach((me, search) -> {
+                calls.add(Call.fixed(me, Map.of(), "Identity on " + label(me) + ", to scope the search."));
+                calls.add(Call.afterLogin(search, login -> withPaging(search, Map.of("query", "user:" + login), 100),
+                        "Repositories owned by the login of " + label(search) + "."));
+            });
+            case MY_PULL_REQUESTS -> {
+                String qualifier = switch (q.state() == null ? "open" : q.state()) {
+                    case "closed" -> " is:closed";
+                    case "merged" -> " is:merged";
+                    case "all" -> "";
+                    default -> " is:open";
+                };
+                perConnection(tools, "search_pull_requests").forEach((me, search) -> {
+                    calls.add(Call.fixed(me, Map.of(), "Identity on " + label(me) + ", to scope the search."));
+                    calls.add(Call.afterLogin(search,
+                            login -> withPaging(search, Map.of("query", "is:pr" + qualifier + " user:" + login), 50),
+                            "Pull requests in repositories owned by the login of " + label(search) + "."));
+                });
+            }
+            case REPO_COMMITS -> first(tools, "list_commits").ifPresent(t -> calls.add(Call.fixed(t,
+                    withPaging(t, repoArgs(q), q.limit() == null ? 10 : q.limit()), "Latest commits of " + slug(q) + ".")));
+            case REPO_BRANCHES -> first(tools, "list_branches").ifPresent(t -> calls.add(Call.fixed(t,
+                    withPaging(t, repoArgs(q), 100), "Branches of " + slug(q) + ".")));
+            case REPO_LATEST_RELEASE -> {
+                Optional<McpToolCandidate> latest = first(tools, "get_latest_release");
+                if (latest.isPresent()) {
+                    calls.add(Call.fixed(latest.get(), repoArgs(q), "Latest release of " + slug(q) + "."));
+                } else {
+                    first(tools, "list_releases").ifPresent(t -> calls.add(Call.fixed(t, withPaging(t, repoArgs(q), 1),
+                            "Latest release of " + slug(q) + ".")));
+                }
+            }
+            case REPO_RELEASES -> first(tools, "list_releases").ifPresent(t -> calls.add(Call.fixed(t,
+                    withPaging(t, repoArgs(q), q.limit() == null ? 10 : q.limit()), "Releases of " + slug(q) + ".")));
+            case REPO_PULL_REQUESTS, REPO_ISSUES -> {
+                String toolName = q.intent() == Intent.REPO_PULL_REQUESTS ? "list_pull_requests" : "list_issues";
+                Optional<McpToolCandidate> tool = first(tools, toolName);
+                if (tool.isPresent()) {
+                    Map<String, Object> args = repoArgs(q);
+                    String wanted = q.state() == null ? "open" : q.state();
+                    Optional<Object> state = stateValue(tool.get(), wanted);
+                    if (state.isEmpty() && !"open".equals(wanted)) {
+                        return Optional.empty(); // e.g. "merged" is not a filter this tool has: let the agent handle it
+                    }
+                    state.ifPresent(value -> args.put("state", value));
+                    calls.add(Call.fixed(tool.get(), withPaging(tool.get(), args, 50),
+                            (q.intent() == Intent.REPO_PULL_REQUESTS ? "Pull requests" : "Issues") + " of " + slug(q) + "."));
+                }
+            }
+        }
+        return calls.isEmpty() ? Optional.empty() : Optional.of(calls);
+    }
+
+    // ---------------------------------------------------------------- execution
+
+    private final class Run {
+        final String question;
+        final AgentExecutionListener listener;
+        AgentExecutionState state;
+        final Map<UUID, String> logins = new HashMap<>();
+        final Map<Integer, Call> callByStep = new LinkedHashMap<>();
+        String failure;
+
+        Run(String question, AgentExecutionListener listener) {
+            this.question = question;
+            this.listener = listener == null ? AgentExecutionListener.NONE : listener;
+            this.state = AgentExecutionState.initial(question);
+        }
+
+        boolean execute(Call call) {
+            Map<String, Object> arguments = call.arguments();
+            if (call.dependsOnLogin()) {
+                String login = logins.get(call.tool().serverId());
+                if (login == null) {
+                    return true; // identity failed on this connection: its failure is already recorded
+                }
+                arguments = call.withLogin().apply(login);
+            }
+            int number = state.stepCount() + 1;
+            AgentExecutionStep step = executor.execute(number, new ToolSelectionPlan(
+                    call.tool().serverId(), call.tool().toolName(), arguments, "Fast path: " + call.reason()));
+            state = state.addStep(step);
+            callByStep.put(number, call);
+            try {
+                listener.onStep(step);
+            } catch (RuntimeException ignored) {
+                // progress persistence must not break the run
+            }
+            if (step.status() != AgentStepStatus.SUCCESS) {
+                failure = call.tool().toolName() + " on " + label(call.tool()) + " failed"
+                        + (step.errorMessage() == null ? "" : ": " + step.errorMessage());
+                return true; // other connections still run; calls needing this one's login are skipped
+            }
+            if (call.tool().toolName().equals("get_me")) {
+                rootJson(step).map(me -> AnswerTemplates.text(me, "login", "username"))
+                        .ifPresent(login -> logins.put(call.tool().serverId(), login));
+            }
+            return true;
+        }
+    }
+
+    private Result finish(ParsedQuestion q, Run run, AnswerFallback fallback) {
+        boolean anySuccess = run.state.hasSuccessfulStep();
+        String reason = run.failure == null
+                ? "Answered by the fast path (" + q.intent() + "): " + run.state.stepCount() + " tool call(s), no AI model call."
+                : "Fast path (" + q.intent() + "): " + run.failure;
+        AgentExecutionState execution = run.state.finish(
+                run.failure == null || anySuccess ? AgentExecutionStatus.COMPLETED : AgentExecutionStatus.FAILED, reason);
+
+        GroundedAnswerContext context = contextBuilder.build(execution);
+        Map<Integer, String> citations = new HashMap<>();
+        for (GroundedEvidence evidence : context.evidence()) {
+            citations.put(evidence.stepNumber(), evidence.citation());
+        }
+
+        Optional<String> text = render(q, run, execution, citations);
+        if (text.isEmpty() || run.failure != null) {
+            // A template could not read the output, or a step failed: the regular answer step decides,
+            // and its own checks (coverage, citations, claim check) apply.
+            GroundedAnswer answer = fallback.generate(execution);
+            return new Result(execution, answer, q.intent(), false);
+        }
+        GroundedAnswer answer = new GroundedAnswer(text.get(), context.evidence(), execution.status(),
+                true, false, GroundedAnswer.Coverage.FULL);
+        return new Result(execution, answer, q.intent(), true);
+    }
+
+    private Optional<String> render(ParsedQuestion q, Run run, AgentExecutionState execution, Map<Integer, String> citations) {
+        List<String> sections = new ArrayList<>();
+        boolean several = run.callByStep.values().stream().map(c -> c.tool().serverId()).distinct().count() > 1;
+
+        for (AgentExecutionStep step : execution.steps()) {
+            Call call = run.callByStep.get(step.stepNumber());
+            String citation = citations.get(step.stepNumber());
+            if (call == null || citation == null || step.status() != AgentStepStatus.SUCCESS) {
+                continue;
+            }
+            boolean identityOnly = q.intent() == Intent.WHO_AM_I;
+            if (!identityOnly && call.tool().toolName().equals("get_me")) {
+                continue; // the identity step only scopes the real query
+            }
+            Optional<JsonNode> root = rootJson(step);
+            if (root.isEmpty()) {
+                return Optional.empty();
+            }
+            String login = run.logins.get(call.tool().serverId());
+            Optional<String> section = switch (q.intent()) {
+                case WHO_AM_I -> AnswerTemplates.identity(root.get(), citation);
+                case MY_REPOS -> AnswerTemplates.repositories(root.get(), login, citation);
+                case MY_PULL_REQUESTS -> AnswerTemplates.issuesOrPulls(root.get(),
+                        stateWord(q.state(), "pull requests"), "in repositories owned by **" + login + "**", citation);
+                case REPO_PULL_REQUESTS -> AnswerTemplates.issuesOrPulls(root.get(),
+                        stateWord(q.state(), "pull requests"), "in `" + slug(q) + "`", citation);
+                case REPO_ISSUES -> AnswerTemplates.issuesOrPulls(root.get(),
+                        stateWord(q.state(), "issues"), "in `" + slug(q) + "`", citation);
+                case REPO_COMMITS -> AnswerTemplates.commits(root.get(), slug(q), citation);
+                case REPO_RELEASES, REPO_LATEST_RELEASE -> AnswerTemplates.releases(root.get(), slug(q), citation);
+                case REPO_BRANCHES -> AnswerTemplates.branches(root.get(), slug(q), citation);
+            };
+            if (section.isEmpty()) {
+                return Optional.empty();
+            }
+            String body = section.get();
+            if (q.intent() == Intent.WHO_AM_I) {
+                body = (several ? "**" + label(call.tool()) + "**: " : "") + capitalize(body);
+            } else if (several) {
+                body = "**" + label(call.tool()) + "**: " + body;
+            }
+            sections.add(body);
+        }
+        return sections.isEmpty() ? Optional.empty() : Optional.of(String.join("\n\n", sections));
+    }
+
+    // ---------------------------------------------------------------- helpers
+
+    private static Optional<JsonNode> rootJson(AgentExecutionStep step) {
+        for (ToolExecutionContent content : step.result().content()) {
+            Optional<JsonNode> json = AnswerTemplates.json(content.text());
+            if (json.isPresent()) {
+                return json;
+            }
+        }
+        if (step.result().structuredContent() != null) {
+            try {
+                return Optional.of(new com.fasterxml.jackson.databind.ObjectMapper().valueToTree(step.result().structuredContent()));
+            } catch (IllegalArgumentException ignored) {
+                return Optional.empty();
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static List<McpToolCandidate> named(List<McpToolCandidate> tools, String name) {
+        return tools.stream().filter(t -> t.toolName().equals(name)).toList();
+    }
+
+    private static Optional<McpToolCandidate> first(List<McpToolCandidate> tools, String name) {
+        return named(tools, name).stream().findFirst();
+    }
+
+    /** get_me -> tool, for every connection that has both. */
+    private static Map<McpToolCandidate, McpToolCandidate> perConnection(List<McpToolCandidate> tools, String toolName) {
+        Map<McpToolCandidate, McpToolCandidate> pairs = new LinkedHashMap<>();
+        for (McpToolCandidate me : named(tools, "get_me")) {
+            named(tools, toolName).stream().filter(t -> t.serverId().equals(me.serverId())).findFirst()
+                    .ifPresent(tool -> pairs.put(me, tool));
+        }
+        return pairs;
+    }
+
+    private static Map<String, Object> repoArgs(ParsedQuestion q) {
+        Map<String, Object> args = new LinkedHashMap<>();
+        args.put("owner", q.owner());
+        args.put("repo", q.repo());
+        return args;
+    }
+
+    /** Adds a page size only when the tool declares one (perPage / per_page). */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> withPaging(McpToolCandidate tool, Map<String, Object> args, int size) {
+        Map<String, Object> out = new LinkedHashMap<>(args);
+        if (tool.inputSchema().get("properties") instanceof Map<?, ?> properties) {
+            for (String name : List.of("perPage", "per_page", "first", "limit")) {
+                if (((Map<String, Object>) properties).containsKey(name)) {
+                    out.put(name, (long) size);
+                    break;
+                }
+            }
+        }
+        return out;
+    }
+
+    /** The tool's own spelling of a state filter (e.g. "open" or "OPEN"); empty if it has no such value. */
+    @SuppressWarnings("unchecked")
+    private static Optional<Object> stateValue(McpToolCandidate tool, String wanted) {
+        if (!(tool.inputSchema().get("properties") instanceof Map<?, ?> properties)
+                || !(((Map<String, Object>) properties).get("state") instanceof Map<?, ?> state)) {
+            return Optional.empty();
+        }
+        Object values = state.get("enum");
+        if (!(values instanceof List<?> list)) {
+            return Optional.of(wanted);
+        }
+        return list.stream().filter(v -> String.valueOf(v).equalsIgnoreCase(wanted)).map(v -> (Object) v).findFirst();
+    }
+
+    private static String stateWord(String state, String what) {
+        if (state == null || "open".equals(state)) return "open " + what;
+        if ("all".equals(state)) return what;
+        return state + " " + what;
+    }
+
+    private static String slug(ParsedQuestion q) {
+        return q.owner() + "/" + q.repo();
+    }
+
+    private static String label(McpToolCandidate tool) {
+        return tool.serverName().isBlank() ? "the connection" : tool.serverName();
+    }
+
+    private static String capitalize(String text) {
+        return text.isEmpty() ? text : text.substring(0, 1).toUpperCase(Locale.ROOT) + text.substring(1);
+    }
+}

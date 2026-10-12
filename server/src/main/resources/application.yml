@@ -61,6 +61,9 @@ connectai:
     ollama-num-ctx: ${OLLAMA_NUM_CTX:8192}
     temperature: 0
   agent:
+    fast-path:
+      # Answer recognised questions with a fixed recipe and template (no model call).
+      enabled: ${CONNECTAI_FAST_PATH_ENABLED:true}
     # Hard budgets for one investigation.
     max-steps: 6
     max-duration-seconds: 600

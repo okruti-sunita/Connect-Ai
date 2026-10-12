@@ -5,6 +5,7 @@ import "./style/investigations.scss";
 import { getInvestigation, STATUS_LABEL } from "./api";
 import { errorText } from "../../api/http";
 import EvidenceDrawer from "./EvidenceDrawer";
+import AnswerText from "./AnswerText";
 import SourceBadge from "./SourceBadge";
 import ToolIcon from "./ToolIcon";
 import { TERMINAL_STATUSES, type EvidenceItem, type InvestigationDetailData } from "./types";
@@ -109,6 +110,16 @@ const InvestigationDetail = ({ id, onBack }: Props) => {
                             Started {data.startedAgo}
                             {data.completedAgo && <> · finished {data.completedAgo}</>}
                         </p>
+                        {data.route && (
+                            <span className={`route-badge ${data.route === 'FAST_PATH' ? 'fast' : 'ai'}`}
+                                  title={data.route === 'FAST_PATH'
+                                      ? 'Recognised question: a fixed recipe of read-only tool calls and an exact template answer. No AI model call.'
+                                      : 'Planned and answered by the AI agent.'}>
+                                {data.route === 'FAST_PATH' ? '⚡ Fast path' : '🧠 AI agent'}
+                                {data.durationSeconds != null && <> · {data.durationSeconds < 10 ? data.durationSeconds.toFixed(1) : Math.round(data.durationSeconds)} s</>}
+                                {data.route === 'FAST_PATH' && <> · no AI model call</>}
+                            </span>
+                        )}
                     </div>
                 </div>
 
@@ -154,7 +165,7 @@ const InvestigationDetail = ({ id, onBack }: Props) => {
                     <div className="run-results">
                         <div className={`run-summary ${data.status}`}>
                             <strong><Sparkles size={15} /> {hasAnswer ? "Answer" : data.status === "inconclusive" ? "No reliable answer" : "Investigation failed"}</strong>
-                            <p className="answer-text">{data.summary.text || "The server returned no answer text."}</p>
+                            {data.summary.text ? <AnswerText text={data.summary.text} /> : <p>The server returned no answer text.</p>}
                             {data.stopReason && <p className="stop-reason">Stopped because: {data.stopReason}</p>}
                             {data.summary.keyEvidence.length > 0 && (
                                 <>

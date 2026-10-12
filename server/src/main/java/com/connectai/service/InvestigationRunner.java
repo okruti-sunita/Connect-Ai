@@ -8,11 +8,13 @@ import com.connectai.agent.GroundedAnswer;
 import com.connectai.agent.GroundedAnswerGenerator;
 import com.connectai.agent.McpToolCandidate;
 import com.connectai.agent.ToolShortlister;
+import com.connectai.agent.fastpath.FastPathEngine;
 import com.connectai.mcp.entity.EMcpServer;
 import com.connectai.mcp.repository.McpServerRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
@@ -38,18 +40,21 @@ public class InvestigationRunner {
     private final GroundedAnswerGenerator answerGenerator;
     private final InvestigationStore store;
     private final McpServerRepository servers;
+    private final FastPathEngine fastPath;
 
     public InvestigationRunner(
             AgentToolCatalog toolCatalog,
             ControlledAgentExecutor executor,
             GroundedAnswerGenerator answerGenerator,
             InvestigationStore store,
-            McpServerRepository servers) {
+            McpServerRepository servers,
+            ObjectProvider<FastPathEngine> fastPath) {
         this.toolCatalog = toolCatalog;
         this.executor = executor;
         this.answerGenerator = answerGenerator;
         this.store = store;
         this.servers = servers;
+        this.fastPath = fastPath.getIfAvailable();
     }
 
     public void run(UUID investigationId, String question) {
@@ -58,6 +63,21 @@ public class InvestigationRunner {
         try {
             List<McpToolCandidate> tools = toolCatalog.getAvailableTools();
             log.info("Investigation run started: id={}, availableTools={}", investigationId, tools.size());
+            Map<UUID, String> connections = serverNames(tools);
+
+            // Hybrid routing: recognised questions are answered by a deterministic recipe with no model
+            // call; everything else goes to the AI agent.
+            if (fastPath != null) {
+                var fast = fastPath.run(question, tools, step -> store.appendStep(investigationId, step),
+                        execution -> answerGenerator.generate(execution, new AnswerHints(List.of(), connections)));
+                if (fast.isPresent()) {
+                    store.complete(investigationId, fast.get().execution(), fast.get().answer(), connections, "FAST_PATH");
+                    log.info("Investigation answered by the fast path: id={}, intent={}, templateAnswer={}, elapsedMs={}",
+                            investigationId, fast.get().intent(), fast.get().templateAnswer(),
+                            (System.nanoTime() - started) / 1_000_000);
+                    return;
+                }
+            }
 
             AgentExecutionState execution = executor.execute(
                     question,
@@ -68,9 +88,8 @@ public class InvestigationRunner {
             if (!uncovered.isEmpty()) {
                 log.info("Question asks for data no connected tool provides: {}", uncovered);
             }
-            Map<UUID, String> connections = serverNames(tools);
             GroundedAnswer answer = answerGenerator.generate(execution, new AnswerHints(uncovered, connections));
-            store.complete(investigationId, execution, answer, connections);
+            store.complete(investigationId, execution, answer, connections, "AI_AGENT");
 
             log.info("Investigation run finished: id={}, executionStatus={}, grounded={}, fallbackUsed={}, elapsedMs={}",
                     investigationId, execution.status(), answer.grounded(), answer.fallbackUsed(),

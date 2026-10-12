@@ -13,6 +13,8 @@ export interface InvestigationSummary {
     sources: ToolSource[];
     owner?: string; // initials; the server has no users yet, so this stays empty for now
     updatedAgo: string;
+    /** FAST_PATH (deterministic, no model call) or AI_AGENT; null while running. */
+    route?: string | null;
 }
 
 export interface InvestigationTag {
@@ -84,6 +86,10 @@ export interface InvestigationDetailData {
     startedBy?: string; // same: filled in once users exist
     /** Why the agent stopped (budget, no relevant tool, planner error...). */
     stopReason: string | null;
+    /** FAST_PATH or AI_AGENT; null while running. */
+    route: string | null;
+    /** Wall-clock seconds from submission to completion; null while running. */
+    durationSeconds: number | null;
     tags: InvestigationTag[];
     steps: InvestigationStep[];
     evidence: EvidenceItem[];

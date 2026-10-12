@@ -109,9 +109,8 @@ class McpInvestigationPipelineIntegrationTest {
         Map<String, Object> investigation = post("/api/investigations",
                 Map.of("question", "Identify my authenticated account login")).getBody();
 
-        // LLM disabled: the deterministic template lists the evidence but cannot verify an answer,
-        // so the honest status is PARTIAL (ANSWERED requires a verified, fully covering answer).
-        assertThat(investigation).containsEntry("status", "PARTIAL");
+        // Recognised question: answered by the deterministic fast path (exact template, no model call).
+        assertThat(investigation).containsEntry("status", "ANSWERED").containsEntry("route", "FAST_PATH");
         List<Map<String, Object>> steps = list(investigation.get("steps"));
         assertThat(steps).hasSize(1);
         assertThat(steps.get(0)).containsEntry("toolName", "get_me").containsEntry("status", "SUCCESS")
@@ -124,7 +123,7 @@ class McpInvestigationPipelineIntegrationTest {
 
         // Reload: the persisted record matches what the POST returned.
         Map<String, Object> reloaded = get("/api/investigations/" + investigation.get("id")).getBody();
-        assertThat(reloaded.get("status")).isEqualTo("PARTIAL");
+        assertThat(reloaded.get("status")).isEqualTo("ANSWERED");
         assertThat(list(reloaded.get("evidence"))).hasSize(1);
         assertThat(reloaded.get("completedAt")).isNotNull();
     }

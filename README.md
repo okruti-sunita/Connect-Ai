@@ -112,6 +112,23 @@ returns the existing run.
 Stop conditions: planner FINISH, no relevant tool, planner error after its retries, identical call
 repeated, two consecutive tool failures, step budget, time budget.
 
+### Hybrid engine: fast path first, AI only when needed
+
+Most questions follow a few patterns, so a deterministic **fast path** answers them with **no model call**:
+
+1. `IntentParser` recognises the question (who am I, my repositories, my pull requests, commits / pull
+   requests / issues / releases / branches of `owner/repo`) and extracts owner, repo, state and limit.
+   Anything that needs judgement (why, compare, most, root cause, failures, time windows...) is left to the AI.
+2. A fixed recipe of **read-only** MCP tool calls runs through the same validated executor (steps and
+   evidence are recorded exactly like an agent run). "My ..." recipes run on every connection, each scoped
+   to that connection's own login.
+3. `AnswerTemplates` render the tool's JSON into an exact answer with citations; nothing is paraphrased.
+   If the output has an unexpected shape, the regular (AI) answer step writes the answer instead.
+
+Unrecognised questions go to the AI agent. Each investigation records its `route` (`FAST_PATH` / `AI_AGENT`),
+shown in the UI with the time taken. Measured on a laptop CPU with qwen3:1.7b: fast path ~4-7 s (mostly
+GitHub latency) versus ~50-90 s through the model. Disable with `CONNECTAI_FAST_PATH_ENABLED=false`.
+
 ### Safeguards against wrong answers (small local models)
 
 - **Read-only tools only.** Investigations never see tools that may change data (MCP `readOnlyHint`,

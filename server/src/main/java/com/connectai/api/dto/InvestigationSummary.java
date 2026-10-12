@@ -18,7 +18,8 @@ public record InvestigationSummary(
         boolean archived,
         List<SourceType> sources,
         int evidenceCount,
-        Instant createdAt
+        Instant createdAt,
+        String route
 ) {
     public static InvestigationSummary from(Investigation i) {
         List<SourceType> sources = i.getEvidenceItems().stream()
@@ -35,6 +36,7 @@ public record InvestigationSummary(
                 i.isArchived(),
                 sources,
                 i.getEvidenceItems().size(),
-                i.getCreatedAt());
+                i.getCreatedAt(),
+                i.getRoute());
     }
 }

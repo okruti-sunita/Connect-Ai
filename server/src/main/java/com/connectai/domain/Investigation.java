@@ -46,6 +46,10 @@ public class Investigation extends AbstractUUIDPersistable {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    /** How it was answered: FAST_PATH (deterministic recipe, no model call) or AI_AGENT. */
+    @Column(length = 20)
+    private String route;
+
     @OneToMany(
             mappedBy = "investigation",
             cascade = CascadeType.ALL,
@@ -95,6 +99,10 @@ public class Investigation extends AbstractUUIDPersistable {
         this.resolvedAnswer = answer == null ? null : truncate(answer, 8000);
         this.stopReason = reason == null ? null : truncate(reason, 1000);
         this.completedAt = Instant.now();
+    }
+
+    public void answeredBy(String route) {
+        this.route = route;
     }
 
     public boolean isRunning() {

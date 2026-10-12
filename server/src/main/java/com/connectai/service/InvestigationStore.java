@@ -86,6 +86,12 @@ public class InvestigationStore {
      */
     @Transactional
     public void complete(UUID id, AgentExecutionState execution, GroundedAnswer answer, java.util.Map<UUID, String> serverNames) {
+        complete(id, execution, answer, serverNames, "AI_AGENT");
+    }
+
+    @Transactional
+    public void complete(UUID id, AgentExecutionState execution, GroundedAnswer answer,
+                         java.util.Map<UUID, String> serverNames, String route) {
         Investigation investigation = find(id);
         if (!investigation.isRunning()) {
             log.warn("Ignoring completion of investigation {} which is already {}", id, investigation.getStatus());
@@ -97,6 +103,7 @@ public class InvestigationStore {
 
         InvestigationStatus status = statusFor(execution, answer);
         investigation.finish(status, answer.answer(), execution.stopReason());
+        investigation.answeredBy(route);
         log.info("Investigation finished: id={}, status={}, executionStatus={}, steps={}, evidence={}, stopReason={}",
                 id, status, execution.status(), execution.steps().size(), answer.evidence().size(), execution.stopReason());
     }

@@ -5,6 +5,8 @@ import com.connectai.agent.DynamicToolPlanner;
 import com.connectai.agent.PlannedToolExecutor;
 import com.connectai.agent.RuleBasedDynamicToolPlanner;
 import com.connectai.agent.ToolExecutionPort;
+import com.connectai.agent.GroundedAnswerContextBuilder;
+import com.connectai.agent.fastpath.FastPathEngine;
 import com.connectai.llm.LlmMcpToolPlanner;
 import com.connectai.llm.LlmClient;
 import org.springframework.beans.factory.annotation.Value;
@@ -51,6 +53,13 @@ public class AgentExecutionConfig {
     public DynamicToolPlanner ruleBasedDynamicToolPlanner() {
 
         return new RuleBasedDynamicToolPlanner();
+    }
+
+    /** Deterministic answers for recognised questions (no model call). Disable to always use the AI agent. */
+    @Bean
+    @ConditionalOnProperty(name = "connectai.agent.fast-path.enabled", havingValue = "true", matchIfMissing = true)
+    public FastPathEngine fastPathEngine(PlannedToolExecutor executor, GroundedAnswerContextBuilder contextBuilder) {
+        return new FastPathEngine(executor, contextBuilder);
     }
 
     @Bean

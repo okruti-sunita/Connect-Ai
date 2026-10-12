@@ -23,6 +23,8 @@ public record InvestigationResponse(
         boolean archived,
         String resolvedAnswer,
         String stopReason,
+        /** FAST_PATH or AI_AGENT; null while running. */
+        String route,
         Instant createdAt,
         Instant completedAt,
         List<EvidenceResponse> evidence,
@@ -72,6 +74,7 @@ public record InvestigationResponse(
                 i.isArchived(),
                 i.getResolvedAnswer(),
                 i.getStopReason(),
+                i.getRoute(),
                 i.getCreatedAt(),
                 i.getCompletedAt(),
                 evidence,
