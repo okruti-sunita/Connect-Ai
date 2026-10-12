@@ -49,7 +49,7 @@ public final class AnswerTemplates {
     }
 
     /** First non-blank text among the given dotted paths. */
-    static String text(JsonNode node, String... paths) {
+    public static String text(JsonNode node, String... paths) {
         for (String path : paths) {
             JsonNode current = node;
             for (String part : path.split("\\.")) {

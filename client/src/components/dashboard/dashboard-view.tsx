@@ -1,7 +1,15 @@
 import {useEffect, useState} from "react";
 import {useNavigate} from "react-router-dom";
 import './style/dashboard.scss';
-import {getEfficiency, getHealth, type EfficiencyDto, type HealthDto} from "../../api/health";
+import {
+    forgetLearnedRecipe,
+    getEfficiency,
+    getHealth,
+    listLearnedRecipes,
+    type EfficiencyDto,
+    type HealthDto,
+    type LearnedRecipeDto
+} from "../../api/health";
 import {toolsApi, type McpServerDto} from "../tools/tools-api";
 import {findCatalogItem} from "../tools/tools-utils";
 import {listInvestigations, STATUS_LABEL} from "../investigations_new/api";
@@ -25,11 +33,13 @@ const DashboardView = () => {
     const [tools, setTools] = useState<McpServerDto[]>([]);
     const [recent, setRecent] = useState<InvestigationSummary[]>([]);
     const [efficiency, setEfficiency] = useState<EfficiencyDto | null>(null);
+    const [learnedRecipes, setLearnedRecipes] = useState<LearnedRecipeDto[]>([]);
 
     useEffect(() => {
         let alive = true;
         const load = async () => {
-            const [h, t, r, e] = await Promise.allSettled([getHealth(), toolsApi.list(), listInvestigations({size: 5}), getEfficiency()]);
+            const [h, t, r, e, l] = await Promise.allSettled([getHealth(), toolsApi.list(), listInvestigations({size: 5}),
+                getEfficiency(), listLearnedRecipes()]);
             if (!alive) return;
             if (h.status === 'fulfilled') {
                 setHealth(h.value);
@@ -40,6 +50,7 @@ const DashboardView = () => {
             if (t.status === 'fulfilled') setTools(t.value);
             if (r.status === 'fulfilled') setRecent(r.value);
             if (e.status === 'fulfilled') setEfficiency(e.value);
+            if (l.status === 'fulfilled') setLearnedRecipes(l.value);
         };
         void load();
         // Connections may still be reconnecting right after a backend restart.
@@ -49,6 +60,15 @@ const DashboardView = () => {
             clearInterval(timer);
         };
     }, []);
+
+    const forget = async (id: string) => {
+        try {
+            await forgetLearnedRecipe(id);
+            setLearnedRecipes((all) => all.filter((r) => r.id !== id));
+        } catch {
+            // the next refresh shows the real state
+        }
+    };
 
     // Opens the Investigations page and starts a run with this question
     const startInvestigation = (text = question) => {
@@ -164,7 +184,8 @@ const DashboardView = () => {
                     const fast = efficiency.routes['FAST_PATH'];
                     const learned = efficiency.routes['LEARNED'];
                     const ai = efficiency.routes['AI_AGENT'];
-                    const withoutAi = (fast?.runs ?? 0) + (learned?.runs ?? 0);
+                    const withoutAi = fast?.runs ?? 0;
+                    const routed = Object.values(efficiency.routes).reduce((sum, r) => sum + r.runs, 0);
                     return (
                         <div className="dash-efficiency" aria-label="Hybrid engine efficiency (measured)">
                             <div className="dash-eff-head">
@@ -173,7 +194,7 @@ const DashboardView = () => {
                             <div className="dash-eff-grid">
                                 <div className="dash-eff-card">
                                     <b>{efficiency.fastPathShare != null ? Math.round(efficiency.fastPathShare * 100) : 0}%</b>
-                                    <span>answered without an AI model call ({withoutAi} of {withoutAi + (ai?.runs ?? 0)})</span>
+                                    <span>answered without any AI model call ({withoutAi} of {routed})</span>
                                 </div>
                                 <div className="dash-eff-card">
                                     <b>{fast?.medianSeconds != null ? `${fast.medianSeconds} s` : '—'}</b>
@@ -184,6 +205,10 @@ const DashboardView = () => {
                                     <span>faster (median fast path vs AI agent)</span>
                                 </div>
                                 <div className="dash-eff-card">
+                                    <b>{learned?.runs ?? 0}</b>
+                                    <span>learned-recipe replays (planner skipped){learned?.medianSeconds != null ? `, median ${learned.medianSeconds} s` : ''}</span>
+                                </div>
+                                <div className="dash-eff-card">
                                     <b>{efficiency.honestNonAnswers}</b>
                                     <span>honest "can't fully answer" results instead of guesses</span>
                                 </div>
@@ -191,6 +216,28 @@ const DashboardView = () => {
                         </div>
                     );
                 })()}
+
+                {learnedRecipes.length > 0 && (
+                    <div className="dash-recent dash-learned">
+                        <div className="dash-recent-head">
+                            <span>♻ Learned from answered AI runs</span>
+                            <span className="dash-recent-ago">{learnedRecipes.filter((r) => !r.disabled).length} active</span>
+                        </div>
+                        {learnedRecipes.map((r) => (
+                            <div key={r.id} className={`dash-recent-row dash-learned-row${r.disabled ? ' disabled' : ''}`}
+                                 title={r.disabled ? r.disabledReason ?? 'Disabled' : `Learned from: ${r.exampleQuestion}`}>
+                                <span className={`dash-pill ${r.disabled ? 'failed' : 'resolved'}`}>
+                                    {r.disabled ? 'Disabled' : `Used ${r.useCount}×`}
+                                </span>
+                                <span className="dash-recent-title">
+                                    <code>{r.questionTemplate}</code> → {r.tools.join(' → ')}
+                                </span>
+                                <button type="button" className="dash-forget" onClick={() => void forget(r.id)}
+                                        aria-label={`Forget the recipe for ${r.questionTemplate}`}>Forget</button>
+                            </div>
+                        ))}
+                    </div>
+                )}
 
                 {recent.length > 0 && (
                     <div className="dash-recent">

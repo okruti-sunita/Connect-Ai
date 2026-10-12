@@ -35,3 +35,20 @@ export interface EfficiencyDto {
 }
 
 export const getEfficiency = () => apiRequest<EfficiencyDto>('/insights/efficiency');
+
+/** Mirrors com.connectai.api.LearnedRecipeController.LearnedRecipeDto. */
+export interface LearnedRecipeDto {
+    id: string;
+    questionTemplate: string;
+    exampleQuestion: string;
+    tools: string[];
+    sourceInvestigationId: string | null;
+    createdAt: string;
+    useCount: number;
+    lastUsedAt: string | null;
+    disabled: boolean;
+    disabledReason: string | null;
+}
+
+export const listLearnedRecipes = () => apiRequest<LearnedRecipeDto[]>('/insights/learned');
+export const forgetLearnedRecipe = (id: string) => apiRequest<void>(`/insights/learned/${id}`, 'DELETE');

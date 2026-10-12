@@ -64,6 +64,15 @@ class GenericMcpServerIntegrationTest {
     @Autowired
     McpConnectionService connections;
 
+    @Autowired
+    com.connectai.agent.AgentToolCatalog catalog;
+
+    @Autowired
+    com.connectai.agent.PlannedToolExecutor executor;
+
+    @Autowired
+    com.connectai.service.LearnedRecipeService learned;
+
     @BeforeAll
     void connect() {
         Map<String, Object> body = new HashMap<>();
@@ -120,6 +129,44 @@ class GenericMcpServerIntegrationTest {
         Map<String, Object> result = investigate("why do tickets keep piling up");
         assertThat(result.get("route")).isNotEqualTo("FAST_PATH");
         assertThat(result.get("routeDetail").toString()).contains("needs judgement").contains("why");
+    }
+
+    /**
+     * Self-learning: a plan learned from an answered run is replayed for a question of the same shape
+     * with the new question's values (real tool calls, no planner). With the LLM off, the answer step is
+     * the evidence-listing template, which is PARTIAL, so the replay also disables the recipe: a recipe
+     * only stays active while its replays end ANSWERED.
+     */
+    @Test
+    void learnedPlanIsReplayedWithTheNewQuestionsValues() {
+        var tools = catalog.getAvailableTools();
+        var ticket = tools.stream().filter(t -> t.toolName().equals("get_ticket")).findFirst().orElseThrow();
+        String learnedFrom = "summarize OPS-7 for the standup";
+        var step = executor.execute(1, new com.connectai.agent.ToolSelectionPlan(
+                ticket.serverId(), "get_ticket", Map.of("key", "OPS-7"), "test: the AI agent's plan"));
+        var execution = com.connectai.agent.AgentExecutionState.initial(learnedFrom).addStep(step)
+                .finish(com.connectai.agent.AgentExecutionStatus.COMPLETED, "done");
+        learned.learn(java.util.UUID.randomUUID(), learnedFrom, execution, com.connectai.domain.InvestigationStatus.ANSWERED, tools);
+        assertThat(learned.all()).anySatisfy(r -> assertThat(r.getQuestionTemplate()).isEqualTo("summarize {key} for the standup"));
+
+        Map<String, Object> result = investigate("Summarize OPS-9 for the standup");
+
+        assertThat(result).containsEntry("route", "LEARNED");
+        assertThat(result.get("routeDetail").toString()).contains("learned plan was replayed").contains("key = OPS-9");
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> steps = (List<Map<String, Object>>) result.get("steps");
+        assertThat(steps).singleElement().satisfies(s -> {
+            assertThat(s).containsEntry("toolName", "get_ticket");
+            assertThat(s.get("argumentsJson").toString()).contains("\"key\":\"OPS-9\"");
+        });
+        assertThat(learned.all()).filteredOn(r -> r.getQuestionTemplate().equals("summarize {key} for the standup"))
+                .singleElement().satisfies(r -> {
+                    assertThat(r.getUseCount()).isEqualTo(1);
+                    assertThat(r.isDisabled()).as("a PARTIAL replay disables the recipe").isTrue();
+                });
+
+        assertThat(investigate("Summarize OPS-3 for the standup").get("route"))
+                .as("a disabled recipe is not replayed").isEqualTo("AI_AGENT");
     }
 
     @AfterAll

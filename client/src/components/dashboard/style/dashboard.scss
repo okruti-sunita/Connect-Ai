@@ -787,6 +787,23 @@ body[data-theme="dark"] .container,
 
   .dash-eff-head { font-weight: 600; font-size: 14px; margin-bottom: 10px; }
 
+  .dash-learned-row {
+    cursor: default;
+    &.disabled { opacity: 0.6; }
+    code { font-size: 12px; }
+  }
+
+  .dash-forget {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(127, 127, 127, 0.35);
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    &:hover { background: rgba(127, 127, 127, 0.12); }
+  }
+
   .dash-eff-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));

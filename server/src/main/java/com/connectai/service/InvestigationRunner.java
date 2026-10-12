@@ -41,6 +41,7 @@ public class InvestigationRunner {
     private final InvestigationStore store;
     private final McpServerRepository servers;
     private final FastPathEngine fastPath;
+    private final LearnedRecipeService learned;
 
     public InvestigationRunner(
             AgentToolCatalog toolCatalog,
@@ -48,13 +49,15 @@ public class InvestigationRunner {
             GroundedAnswerGenerator answerGenerator,
             InvestigationStore store,
             McpServerRepository servers,
-            ObjectProvider<FastPathEngine> fastPath) {
+            ObjectProvider<FastPathEngine> fastPath,
+            ObjectProvider<LearnedRecipeService> learned) {
         this.toolCatalog = toolCatalog;
         this.executor = executor;
         this.answerGenerator = answerGenerator;
         this.store = store;
         this.servers = servers;
         this.fastPath = fastPath.getIfAvailable();
+        this.learned = learned.getIfAvailable();
     }
 
     public void run(UUID investigationId, String question) {
@@ -83,6 +86,20 @@ public class InvestigationRunner {
                 }
             }
 
+            // Self-learning: a question shaped like one the agent already answered replays that plan.
+            if (learned != null) {
+                var replay = learned.replay(question, tools, step -> store.appendStep(investigationId, step),
+                        execution -> answerGenerator.generate(execution, new AnswerHints(List.of(), connections)));
+                if (replay.isPresent()) {
+                    var r = replay.get();
+                    store.complete(investigationId, r.execution(), r.answer(), connections, "LEARNED", r.explanation());
+                    learned.review(r.recipeId(), InvestigationStore.statusFor(r.execution(), r.answer()));
+                    log.info("Investigation answered by a learned recipe: id={}, recipe={}, elapsedMs={}",
+                            investigationId, r.recipeId(), (System.nanoTime() - started) / 1_000_000);
+                    return;
+                }
+            }
+
             AgentExecutionState execution = executor.execute(
                     question,
                     tools,
@@ -94,6 +111,9 @@ public class InvestigationRunner {
             }
             GroundedAnswer answer = answerGenerator.generate(execution, new AnswerHints(uncovered, connections));
             store.complete(investigationId, execution, answer, connections, "AI_AGENT", routeDetail);
+            if (learned != null) {
+                learned.learn(investigationId, question, execution, InvestigationStore.statusFor(execution, answer), tools);
+            }
 
             log.info("Investigation run finished: id={}, executionStatus={}, grounded={}, fallbackUsed={}, elapsedMs={}",
                     investigationId, execution.status(), answer.grounded(), answer.fallbackUsed(),

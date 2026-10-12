@@ -68,8 +68,8 @@ public class InsightsController {
                 percentile(values, 50), percentile(values, 90), answered.getOrDefault(route, 0L))));
 
         long routed = durations.values().stream().mapToLong(List::size).sum();
-        long fast = routes.entrySet().stream().filter(e -> !e.getKey().equals("AI_AGENT"))
-                .mapToLong(e -> e.getValue().runs()).sum();
+        // Only the fast path makes no model call at all; a learned replay skips the planner but still writes its answer with one.
+        long fast = routes.containsKey("FAST_PATH") ? routes.get("FAST_PATH").runs() : 0;
         RouteStats ai = routes.get("AI_AGENT");
         RouteStats fastPath = routes.get("FAST_PATH");
         Double speedup = ai != null && fastPath != null && fastPath.medianSeconds() != null && fastPath.medianSeconds() > 0

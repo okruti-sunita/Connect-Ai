@@ -79,7 +79,7 @@ public final class GenericToolMatcher {
         return new ArrayList<>(byServer.values());
     }
 
-    static boolean isIdentityTool(McpToolCandidate tool) {
+    public static boolean isIdentityTool(McpToolCandidate tool) {
         if (!required(tool).isEmpty()) return false;
         String joined = String.join("", nameTokens(tool.toolName()));
         boolean named = nameTokens(tool.toolName()).stream().anyMatch(IDENTITY_NAMES::contains)

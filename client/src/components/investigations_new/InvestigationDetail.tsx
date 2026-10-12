@@ -22,6 +22,19 @@ const MAX_POLL_MS = 15 * 60 * 1000;
 const formatDuration = (ms: number | null) =>
     ms == null ? "" : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`;
 
+/** How each route is shown: FAST_PATH (no model call), LEARNED (replayed plan, planner skipped), AI_AGENT. */
+const ROUTE_BADGE: Record<string, { css: string; label: string; title: string; suffix?: string }> = {
+    FAST_PATH: {
+        css: 'fast', label: '⚡ Fast path', suffix: ' · no AI model call',
+        title: 'Recognised question: a fixed recipe of read-only tool calls and an exact template answer. No AI model call.',
+    },
+    LEARNED: {
+        css: 'learned', label: '♻ Learned recipe', suffix: ' · planner skipped',
+        title: "Same question shape as an earlier answered run: its tool plan was replayed with the new question's values, and one model call wrote the answer.",
+    },
+    AI_AGENT: {css: 'ai', label: '🧠 AI agent', title: 'Planned and answered by the AI agent.'},
+};
+
 const InvestigationDetail = ({ id, onBack }: Props) => {
     const [data, setData] = useState<InvestigationDetailData | null>(null);
     const [loading, setLoading] = useState(true);
@@ -111,13 +124,11 @@ const InvestigationDetail = ({ id, onBack }: Props) => {
                             {data.completedAgo && <> · finished {data.completedAgo}</>}
                         </p>
                         {data.route && (
-                            <span className={`route-badge ${data.route === 'FAST_PATH' ? 'fast' : 'ai'}`}
-                                  title={data.route === 'FAST_PATH'
-                                      ? 'Recognised question: a fixed recipe of read-only tool calls and an exact template answer. No AI model call.'
-                                      : 'Planned and answered by the AI agent.'}>
-                                {data.route === 'FAST_PATH' ? '⚡ Fast path' : '🧠 AI agent'}
+                            <span className={`route-badge ${ROUTE_BADGE[data.route]?.css ?? 'ai'}`}
+                                  title={ROUTE_BADGE[data.route]?.title ?? 'Planned and answered by the AI agent.'}>
+                                {ROUTE_BADGE[data.route]?.label ?? '🧠 AI agent'}
                                 {data.durationSeconds != null && <> · {data.durationSeconds < 10 ? data.durationSeconds.toFixed(1) : Math.round(data.durationSeconds)} s</>}
-                                {data.route === 'FAST_PATH' && <> · no AI model call</>}
+                                {ROUTE_BADGE[data.route]?.suffix}
                             </span>
                         )}
                         {data.routeDetail && (

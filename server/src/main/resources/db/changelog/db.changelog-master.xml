@@ -454,4 +454,36 @@
         </addColumn>
     </changeSet>
 
+    <changeSet id="012-learned-recipe" author="connect-ai">
+        <createTable tableName="learned_recipe">
+            <column name="id" type="${id.type}" defaultValueComputed="${uuid.function}">
+                <constraints nullable="false" primaryKey="true"/>
+            </column>
+            <column name="question_template" type="varchar(500)">
+                <constraints nullable="false" unique="true"/>
+            </column>
+            <column name="example_question" type="varchar(2000)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="steps_json" type="varchar(8000)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="connections" type="varchar(2000)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="source_investigation_id" type="${id.type}"/>
+            <column name="created_at" type="${date.timestamp.type}">
+                <constraints nullable="false"/>
+            </column>
+            <column name="use_count" type="int" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="last_used_at" type="${date.timestamp.type}"/>
+            <column name="disabled" type="boolean" defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+            <column name="disabled_reason" type="varchar(500)"/>
+        </createTable>
+    </changeSet>
+
 </databaseChangeLog>
