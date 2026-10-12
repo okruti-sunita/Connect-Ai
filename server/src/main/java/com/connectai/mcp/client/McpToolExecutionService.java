@@ -6,6 +6,7 @@ import com.connectai.mcp.repository.McpServerRepository;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -19,6 +20,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class McpToolExecutionService {
 
     private final McpServerRepository repository;
@@ -29,6 +31,7 @@ public class McpToolExecutionService {
             String toolName,
             McpToolExecutionRequest request) {
 
+        log.info("MCP tool execution requested: serverId={}, toolName={}, argumentKeys={}", serverId, toolName, request == null || request.arguments() == null ? List.of() : request.arguments().keySet());
         repository.findById(serverId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
@@ -62,16 +65,19 @@ public class McpToolExecutionService {
                             .arguments(arguments)
                             .build();
 
+            log.debug("Calling MCP tool: serverId={}, toolName={}", serverId, toolName);
             McpSchema.CallToolResult result = client.callTool(callToolRequest);
 
             if (result == null) {
                 throw new IllegalStateException("MCP server returned no tool execution result");
             }
 
+            log.info("MCP tool returned: serverId={}, toolName={}, isError={}, contentItems={}, structuredContentPresent={}", serverId, toolName, result.isError(), result.content() == null ? 0 : result.content().size(), result.structuredContent() != null);
             return McpToolExecutionResponse.from(serverId, toolName, result);
         } catch (ResponseStatusException exception) {
             throw exception;
         } catch (Exception exception) {
+            log.error("MCP tool execution failed: serverId={}, toolName={}, cause={}", serverId, toolName, exception.toString(), exception);
             throw new ResponseStatusException(
                     HttpStatus.BAD_GATEWAY,
                     "MCP tool execution failed for '" + toolName + "' on server " + serverId,

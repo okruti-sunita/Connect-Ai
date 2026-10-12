@@ -4,6 +4,8 @@ import com.connectai.api.dto.CreateInvestigationRequest;
 import com.connectai.api.dto.EvidenceResponse;
 import com.connectai.api.dto.InvestigationResponse;
 import com.connectai.api.dto.InvestigationSummary;
+import com.connectai.api.dto.PageResponse;
+import com.connectai.domain.InvestigationStatus;
 import com.connectai.service.InvestigationService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -12,6 +14,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
@@ -35,9 +38,15 @@ public class InvestigationController {
         return ResponseEntity.created(URI.create("/api/investigations/" + created.id())).body(created);
     }
 
+    /** Example: GET /api/investigations?status=ANSWERED&archived=false&q=payment&page=0&size=20 */
     @GetMapping
-    public List<InvestigationSummary> list() {
-        return service.listRecent();
+    public PageResponse<InvestigationSummary> list(
+            @RequestParam(required = false) InvestigationStatus status,
+            @RequestParam(required = false) Boolean archived,
+            @RequestParam(required = false) String q,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return service.search(status, archived, q, page, size);
     }
 
     @GetMapping("/{id}")

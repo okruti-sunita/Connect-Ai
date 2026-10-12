@@ -13,7 +13,7 @@ import '../navbar/style/sidebar.scss'
 type NavbarViewProps = { theme: "light" | "dark"; onToggleTheme: () => void };
 
 // Change these to show the signed-in user in the sidebar footer.
-const CURRENT_USER = {name: "Sunita Ghangas", role: "Software Engineer"};
+// const CURRENT_USER = {name: "Sunita Ghangas", role: "Software Engineer"};
 
 const NAV_ITEMS = [
     {path: "/", label: "New Investigation", icon: Plus},
@@ -21,13 +21,13 @@ const NAV_ITEMS = [
     {path: "/investigations", label: "Investigations", icon: Clock3},
 ];
 
-const getInitials = (name: string) =>
-    name
-        .split(" ")
-        .filter(Boolean)
-        .slice(0, 2)
-        .map((part) => part[0].toUpperCase())
-        .join("");
+// const getInitials = (name: string) =>
+//     name
+//         .split(" ")
+//         .filter(Boolean)
+//         .slice(0, 2)
+//         .map((part) => part[0].toUpperCase())
+//         .join("");
 
 const NavbarView = ({theme, onToggleTheme}: NavbarViewProps) => {
     const navigate = useNavigate();

@@ -13,7 +13,7 @@ interface Props {
     onStart: (question: string) => void;
 }
 
-const QUICK_ACTIONS = ["Attach a Jira ticket", "Paste a Grafana alert", "Link a PR", "Paste a Splunk query"];
+// const QUICK_ACTIONS = ["Attach a Jira ticket", "Paste a Grafana alert", "Link a PR", "Paste a Splunk query"];
 
 const InvestigationList = ({ items, loading, starting, onOpen, onStart }: Props) => {
     const [question, setQuestion] = useState("");
@@ -26,11 +26,11 @@ const InvestigationList = ({ items, loading, starting, onOpen, onStart }: Props)
             i.title.toLowerCase().includes(search.toLowerCase())
     );
 
-    const submit = () => {
-        if (!question.trim()) return;
-        onStart(question.trim());
-        setQuestion("");
-    };
+    // const submit = () => {
+    //     if (!question.trim()) return;
+    //     onStart(question.trim());
+    //     setQuestion("");
+    // };
 
     return (
         <div className="inv-page">
@@ -87,6 +87,7 @@ const InvestigationList = ({ items, loading, starting, onOpen, onStart }: Props)
                             { value: "all", label: "All" },
                             { value: "resolved", label: "Resolved" },
                             { value: "in-progress", label: "In progress" },
+                            { value: "failed", label: "Failed" },
                             { value: "archived", label: "Archived" }
                         ]}
                     />

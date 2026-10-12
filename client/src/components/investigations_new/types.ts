@@ -1,13 +1,13 @@
-export type ToolSource = "github" | "jira" | "grafana" | "splunk" | "kafka" | "slack";
-export type InvestigationStatus = "resolved" | "in-progress" | "archived";
-export type EvidenceCategory = "Code" | "Tickets" | "Metrics" | "Logs" | "Chat";
+export type ToolSource = "github" | "jira" | "grafana" | "splunk" | "kafka" | "slack" | "mcp";
+export type InvestigationStatus = "resolved" | "in-progress" | "failed" | "archived";
+export type EvidenceCategory = "Code" | "Tickets" | "Metrics" | "Logs" | "Chat" | "Other";
 
 export interface InvestigationSummary {
     id: string;
     title: string;
     status: InvestigationStatus;
     sources: ToolSource[];
-    owner: string; // initials
+    owner?: string; // initials; the server has no users yet, so this stays empty for now
     updatedAgo: string;
 }
 
@@ -60,7 +60,7 @@ export interface InvestigationDetailData {
     title: string;
     status: InvestigationStatus;
     startedAgo: string;
-    startedBy: string;
+    startedBy?: string; // same: filled in once users exist
     tags: InvestigationTag[];
     steps: InvestigationStep[];
     evidence: EvidenceItem[];

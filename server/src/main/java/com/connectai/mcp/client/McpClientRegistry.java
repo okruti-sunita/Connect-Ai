@@ -1,6 +1,7 @@
 package com.connectai.mcp.client;
 
 import io.modelcontextprotocol.client.McpSyncClient;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -16,12 +17,14 @@ import java.util.concurrent.ConcurrentHashMap;
  * kept separate.
  */
 @Component
+@Slf4j
 public class McpClientRegistry {
 
     private final Map<UUID, McpSyncClient> clients = new ConcurrentHashMap<>();
 
     public void register(UUID serverId, McpSyncClient client) {
         McpSyncClient previous = clients.put(serverId, client);
+        log.info("MCP runtime client registered: serverId={}, connectedRuntimeServers={}", serverId, clients.size());
 
         if (previous != null && previous != client) {
             previous.closeGracefully();
@@ -39,7 +42,9 @@ public class McpClientRegistry {
     }
 
     public Optional<McpSyncClient> remove(UUID serverId) {
-        return Optional.ofNullable(clients.remove(serverId));
+        Optional<McpSyncClient> removed = Optional.ofNullable(clients.remove(serverId));
+        log.info("MCP runtime client removed: serverId={}, connectedRuntimeServers={}", serverId, clients.size());
+        return removed;
     }
 
     public boolean isConnected(UUID serverId) {

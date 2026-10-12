@@ -6,5 +6,6 @@ public enum SourceType {
     JIRA,
     SPLUNK,
     SLACK,
-    QUEUE
+    QUEUE,
+    MCP
 }

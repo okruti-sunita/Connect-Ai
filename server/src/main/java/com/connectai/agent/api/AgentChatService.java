@@ -5,12 +5,14 @@ import com.connectai.agent.ControlledAgentExecutor;
 import com.connectai.agent.GroundedAnswerGenerator;
 import com.connectai.agent.persistence.AgentConversation;
 import com.connectai.agent.persistence.AgentConversationRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 /**
  * Coordinates agent execution and persists its conversation history.
  */
 @Service
+@Slf4j
 public class AgentChatService {
 
     private final AgentToolCatalog toolCatalog;
@@ -47,9 +49,18 @@ public class AgentChatService {
                         new AgentConversation(question));
 
         try {
+            log.info("Agent run started: conversationId={}, questionLength={}", conversation.getId(), question.length());
             var availableTools = toolCatalog.getAvailableTools();
+            log.info("Agent catalog supplied to planner: conversationId={}, availableTools={}, toolIds={}",
+                    conversation.getId(), availableTools.size(), availableTools.stream().map(t -> t.plannerId()).toList());
             var execution = executor.execute(question, availableTools);
-            var answer = answerGenerator.generate(execution);
+            log.info(
+                    "Agent execution completed: conversationId={}, status={}, steps={}",
+                    conversation.getId(),
+                    execution.status(),
+                    execution.steps().size()
+            );
+           var answer = answerGenerator.generate(execution);
 
             // Persist the completed conversation.
             conversation.complete(execution, answer);
@@ -62,6 +73,7 @@ public class AgentChatService {
                     answer);
 
         } catch (RuntimeException exception) {
+            log.error("Agent run failed: conversationId={}, cause={}", conversation.getId(), exception.toString(), exception);
             // Record the failure before propagating the original exception.
             conversation.markFailed();
             conversationRepository.save(conversation);

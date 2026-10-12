@@ -6,6 +6,7 @@ import com.connectai.mcp.repository.McpServerRepository;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -19,12 +20,14 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class McpToolDiscoveryService {
 
     private final McpServerRepository repository;
     private final McpClientRegistry clientRegistry;
 
     public McpToolDiscoveryResponse discover(UUID serverId) {
+        log.info("MCP discovery requested: serverId={}", serverId);
         repository.findById(serverId)
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND,
@@ -42,6 +45,7 @@ public class McpToolDiscoveryService {
 
         try {
             List<McpSchema.Tool> discoveredTools = listAllTools(client);
+            log.info("MCP discovery completed: serverId={}, toolCount={}, toolNames={}", serverId, discoveredTools.size(), discoveredTools.stream().map(McpSchema.Tool::name).toList());
 
             List<McpDiscoveredTool> tools = discoveredTools.stream()
                     .map(this::toResponse)
@@ -49,6 +53,7 @@ public class McpToolDiscoveryService {
 
             return new McpToolDiscoveryResponse(serverId, tools);
         } catch (Exception exception) {
+            log.error("MCP discovery failed: serverId={}, cause={}", serverId, exception.toString(), exception);
             throw new ResponseStatusException(
                     HttpStatus.BAD_GATEWAY,
                     "MCP tool discovery failed for server " + serverId,
@@ -61,10 +66,12 @@ public class McpToolDiscoveryService {
         Set<String> seenCursors = new HashSet<>();
 
         McpSchema.ListToolsResult result = client.listTools();
+        log.debug("MCP listTools first page: nullResult={}", result == null);
 
         while (result != null) {
             if (result.tools() != null) {
                 tools.addAll(result.tools());
+                log.debug("MCP listTools page: pageTools={}, cumulativeTools={}, hasNextCursor={}", result.tools().size(), tools.size(), result.nextCursor() != null && !result.nextCursor().isBlank());
             }
 
             String cursor = result.nextCursor();

@@ -21,6 +21,8 @@ import java.util.List;
 @Getter
 public class Investigation extends AbstractUUIDPersistable {
 
+    private static final int MAX_TITLE_LENGTH = 120;
+
     @Column(nullable = false, length = 2000)
     private String question;
 
@@ -34,6 +36,9 @@ public class Investigation extends AbstractUUIDPersistable {
     @Column(nullable = false)
     private Instant createdAt;
 
+    @Column(nullable = false)
+    private boolean archived;
+
     @OneToMany(
             mappedBy = "investigation",
             cascade = CascadeType.ALL,
@@ -41,6 +46,10 @@ public class Investigation extends AbstractUUIDPersistable {
     )
     @OrderBy("id ASC")
     private List<EvidenceItem> evidenceItems = new ArrayList<>();
+
+    @OneToMany(mappedBy = "investigation", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("stepNumber ASC")
+    private List<InvestigationStep> steps = new ArrayList<>();
 
     protected Investigation() {
         // required by JPA
@@ -57,6 +66,11 @@ public class Investigation extends AbstractUUIDPersistable {
         item.setInvestigation(this);
     }
 
+    public void addStep(InvestigationStep step) {
+        steps.add(step);
+        step.setInvestigation(this);
+    }
+
     public void markAnswered(String answer) {
         this.resolvedAnswer = answer;
         this.status = InvestigationStatus.ANSWERED;
@@ -65,5 +79,21 @@ public class Investigation extends AbstractUUIDPersistable {
     public void markFailed(String reason) {
         this.resolvedAnswer = reason;
         this.status = InvestigationStatus.FAILED;
+    }
+
+    public void archive() {
+        this.archived = true;
+    }
+
+    public void unarchive() {
+        this.archived = false;
+    }
+
+    /** Short single-line label for lists and headings, derived from the question. */
+    public String getTitle() {
+        String oneLine = question == null ? "" : question.replaceAll("\\s+", " ").trim();
+        return oneLine.length() <= MAX_TITLE_LENGTH
+                ? oneLine
+                : oneLine.substring(0, MAX_TITLE_LENGTH - 3) + "...";
     }
 }

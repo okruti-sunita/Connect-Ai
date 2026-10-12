@@ -83,6 +83,7 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
         }
 
         if (availableTools == null || availableTools.isEmpty()) {
+            log.warn("MCP planner received no available tools; skipping LLM call");
             return Optional.empty();
         }
 
@@ -105,6 +106,7 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
          * - discovered tool metadata
          * - a structured output schema restricting valid actions
          */
+        log.debug("MCP planner asking LLM to choose from {} tools: {}", availableTools.size(), availableTools.stream().map(McpToolCandidate::plannerId).toList());
         JsonNode decision = llm.callTool(
                 SYSTEM,
                 buildPrompt(question, availableTools, state),
@@ -126,6 +128,7 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
                 .path("action")
                 .asText("")
                 .trim();
+        log.info("MCP planner decision received: action={}, argumentsObject={}", action, decision.path("arguments").isObject());
 
         if (FINISH.equalsIgnoreCase(action)) {
             log.info("Dynamic MCP planner chose FINISH");
@@ -175,6 +178,7 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
                 .asText("")
                 .trim();
 
+        log.info("MCP planner selected tool: serverId={}, toolName={}, argumentKeys={}, reason={}", candidate.serverId(), candidate.toolName(), arguments.keySet(), reason);
         return Optional.of(
                 new ToolSelectionPlan(
                         candidate.serverId(),

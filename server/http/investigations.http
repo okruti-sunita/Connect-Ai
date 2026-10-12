@@ -1,14 +1,14 @@
-### Create a new investigation
-POST http://localhost:8080/api/investigations
+### Create a new investigation (runs the agent and returns the finished run)
+POST http://localhost:8080/connect-ai/api/investigations
 Content-Type: application/json
 
 { "question": "Why are orders stuck in Payment Processing?" }
 
-### List recent investigations
-GET http://localhost:8080/api/investigations
+### List (newest first). All parameters are optional
+GET http://localhost:8080/connect-ai/api/investigations?status=ANSWERED&archived=false&q=payment&page=0&size=20
 
-### Get one investigation with its evidence
-GET http://localhost:8080/api/investigations/1
+### Get one investigation with its evidence (paste an id from the list)
+GET http://localhost:8080/connect-ai/api/investigations/{{id}}
 
 ### Evidence only
-GET http://localhost:8080/api/investigations/1/evidence
+GET http://localhost:8080/connect-ai/api/investigations/{{id}}/evidence

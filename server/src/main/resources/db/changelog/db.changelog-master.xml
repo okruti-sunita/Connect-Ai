@@ -358,4 +358,43 @@
 
     </changeSet>
 
+    <changeSet id="004-add-investigation-archived" author="connect-ai">
+
+        <addColumn tableName="investigation">
+            <column name="archived"
+                    type="boolean"
+                    defaultValueBoolean="false">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+
+    </changeSet>
+
+    <changeSet id="007-create-investigation-step" author="connect-ai">
+        <createTable tableName="investigation_step">
+            <column name="id" type="${id.type}" defaultValueComputed="${uuid.function}">
+                <constraints nullable="false" primaryKey="true" primaryKeyName="pk_investigation_step"/>
+            </column>
+            <column name="investigation_id" type="${id.type}">
+                <constraints nullable="false"/>
+            </column>
+            <column name="step_number" type="int">
+                <constraints nullable="false"/>
+            </column>
+            <column name="tool_name" type="varchar(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="status" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+        <addForeignKeyConstraint baseTableName="investigation_step" baseColumnNames="investigation_id"
+            referencedTableName="investigation" referencedColumnNames="id"
+            constraintName="fk_investigation_step_investigation" onDelete="CASCADE"/>
+        <createIndex tableName="investigation_step" indexName="idx_investigation_step_order">
+            <column name="investigation_id"/>
+            <column name="step_number"/>
+        </createIndex>
+    </changeSet>
+
 </databaseChangeLog>

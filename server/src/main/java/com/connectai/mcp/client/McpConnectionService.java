@@ -44,6 +44,8 @@ public class McpConnectionService {
                     server.getName());
 
             client = clientFactory.create(server);
+            log.debug("MCP client constructed: serverId={}, transport={}, endpointHostOnly={}",
+                    serverId, server.getTransport(), safeEndpointHost(server.getEndpoint()));
 
             McpSchema.InitializeResult initializeResult = client.initialize();
 
@@ -155,6 +157,15 @@ public class McpConnectionService {
             log.warn(
                     "Failed to close MCP client after handshake failure",
                     closeException);
+        }
+    }
+
+    private String safeEndpointHost(String endpoint) {
+        try {
+            java.net.URI uri = java.net.URI.create(endpoint);
+            return uri.getScheme() + "://" + uri.getHost();
+        } catch (Exception ignored) {
+            return "<invalid-endpoint>";
         }
     }
 

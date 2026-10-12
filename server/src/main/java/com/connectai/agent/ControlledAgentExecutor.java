@@ -1,5 +1,8 @@
 package com.connectai.agent;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -11,6 +14,9 @@ import java.util.Optional;
  * This class owns only the execution-loop policy.
  */
 public class ControlledAgentExecutor {
+
+    private static final Logger log =
+            LoggerFactory.getLogger(ControlledAgentExecutor.class);
 
     private final DynamicToolPlanner planner;
     private final PlannedToolExecutor toolExecutor;
@@ -60,7 +66,14 @@ public class ControlledAgentExecutor {
                             availableTools,
                             state);
 
+            log.debug(
+                    "Tool planner evaluated investigation step {} (availableTools={}, previousSteps={})",
+                    stepNumber,
+                    availableTools == null ? 0 : availableTools.size(),
+                    state.steps().size());
+
             if (plan.isEmpty()) {
+                log.info("Tool planner selected no further tool at step {}; execution complete", stepNumber);
                 return state.withStatus(
                         AgentExecutionStatus.COMPLETED);
             }
@@ -69,6 +82,19 @@ public class ControlledAgentExecutor {
                     toolExecutor.execute(
                             stepNumber,
                             plan.get());
+
+            // Do not log tool arguments: they can contain user data or credentials.
+            log.info(
+                    "Tool selected: step={}, serverId={}, tool={}, reason={}",
+                    stepNumber,
+                    plan.get().serverId(),
+                    plan.get().toolName(),
+                    plan.get().reason());
+            log.info(
+                    "Tool execution result: step={}, tool={}, status={}",
+                    stepNumber,
+                    plan.get().toolName(),
+                    step.status());
 
             state = state.addStep(step);
 

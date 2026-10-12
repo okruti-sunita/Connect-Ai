@@ -12,7 +12,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@SpringBootTest(properties = "connectai.seed-demo-data=false")
+@SpringBootTest(properties = {"connectai.seed-demo-data=false", "connectai.tools.mode=fake"})
 @AutoConfigureMockMvc
 class InvestigationApiTest {
 

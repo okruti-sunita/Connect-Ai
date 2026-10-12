@@ -9,9 +9,9 @@ import {
     API_BASE_URL,
     CATEGORIES,
     TOOL_CATALOG,
-    type CatalogTool
-} from "./tool-catalog";
 
+} from "./tool-catalog";
+import type { CatalogTool } from "./tool-catalog";
 type ToolStatus =
     | "REGISTERED"
     | "CONNECTING"

@@ -6,7 +6,8 @@ export const SOURCE_LABEL: Record<ToolSource, string> = {
     grafana: "Grafana",
     splunk: "Splunk",
     kafka: "Kafka",
-    slack: "Slack"
+    slack: "Slack",
+    mcp: "MCP Tool"
 };
 
 export const SOURCE_ABBR: Record<ToolSource, string> = {
@@ -15,5 +16,6 @@ export const SOURCE_ABBR: Record<ToolSource, string> = {
     grafana: "GR",
     splunk: "SP",
     kafka: "KA",
-    slack: "SL"
+    slack: "SL",
+    mcp: "MCP"
 };

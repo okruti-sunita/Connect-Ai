@@ -27,16 +27,27 @@ public class LlmConfig {
 
     @Bean
     public LlmClient llmClient(@Value("${connectai.llm.api-key:}") String apiKey,
+                               @Value("${connectai.llm.provider:anthropic}") String provider,
                                @Value("${connectai.llm.base-url:https://api.anthropic.com}") String baseUrl,
+                               @Value("${connectai.llm.ollama-base-url:http://localhost:11434}") String ollamaBaseUrl,
+                               @Value("${connectai.llm.ollama-model:qwen3:8b}") String ollamaModel,
                                @Value("${connectai.llm.model:claude-haiku-4-5-20251001}") String model,
                                @Value("${connectai.llm.max-tokens:1024}") int maxTokens,
                                @Value("${connectai.llm.timeout-seconds:30}") long timeoutSeconds,
                                ObjectMapper mapper) {
+        if ("ollama".equalsIgnoreCase(provider)) {
+            log.info("LLM mode ON: provider=ollama, model={}, baseUrl={}", ollamaModel, ollamaBaseUrl);
+            return new OllamaClient(ollamaBaseUrl, ollamaModel, Duration.ofSeconds(timeoutSeconds), mapper);
+        }
+        if (!"anthropic".equalsIgnoreCase(provider)) {
+            throw new IllegalStateException("Unsupported connectai.llm.provider='" + provider
+                    + "'. Supported providers are 'anthropic' and 'ollama'.");
+        }
         if (apiKey == null || apiKey.isBlank()) {
             throw new IllegalStateException(
                     "connectai.llm.enabled=true but no API key is set. Set the ANTHROPIC_API_KEY environment variable.");
         }
-        log.info("LLM mode ON: model={}", model);
+        log.info("LLM mode ON: provider=anthropic, model={}", model);
         return new AnthropicClient(baseUrl, apiKey, model, maxTokens, Duration.ofSeconds(timeoutSeconds), mapper);
     }
 

@@ -1,0 +1,19 @@
+# Local development configuration
+
+connectai:
+  tools:
+    mode: mcp
+  llm:
+    enabled: true
+    provider: ollama
+    ollama-base-url: http://localhost:11434
+    ollama-model: qwen3:1.7b
+    timeout-seconds: 180
+
+logging:
+  level:
+    root: INFO
+    com.connectai.agent: DEBUG
+    com.connectai.llm: DEBUG
+    com.connectai.mcp: DEBUG
+    com.connectai.service.InvestigationService: DEBUG

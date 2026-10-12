@@ -14,12 +14,9 @@ interface Props {
     onBack: () => void;
 }
 
-const STEP_DELAY_MS = 700;
-
 const InvestigationDetail = ({ id, onBack }: Props) => {
     const [data, setData] = useState<InvestigationDetailData | null>(null);
     const [loading, setLoading] = useState(true);
-    const [revealed, setRevealed] = useState(0); // steps shown so far; total+1 = finished
     const [active, setActive] = useState<EvidenceItem | null>(null);
 
     /* Load investigation */
@@ -38,20 +35,6 @@ const InvestigationDetail = ({ id, onBack }: Props) => {
         };
     }, [id]);
 
-    /* Reveal the tool steps one by one for in-progress investigations */
-    useEffect(() => {
-        if (!data) return undefined;
-        const total = data.steps.length;
-        if (data.status !== "in-progress") {
-            setRevealed(total + 1);
-            return undefined;
-        }
-        setRevealed(0);
-        const timer = window.setInterval(() => {
-            setRevealed((r) => (r > total ? r : r + 1));
-        }, STEP_DELAY_MS);
-        return () => window.clearInterval(timer);
-    }, [data]);
 
     if (loading || !data) {
         return (
@@ -64,9 +47,8 @@ const InvestigationDetail = ({ id, onBack }: Props) => {
         );
     }
 
-    const total = data.steps.length;
-    const shown = Math.min(revealed, total);
-    const finished = revealed > total;
+    // These are real execution steps returned by the backend.
+    const finished = data.status !== "in-progress";
 
     return (
         <div className="inv-page detail">
@@ -102,19 +84,17 @@ const InvestigationDetail = ({ id, onBack }: Props) => {
                 </div>
 
                 {/* Tool steps */}
-                <div className="run-steps">
-                    {data.steps.slice(0, shown).map((s, i) => {
-                        const running = !finished && i === shown - 1;
-                        return (
-                            <div key={s.id} className="step-line">
-                                <span className={`dot ${running ? "running" : "done"}`} />
-                                <b>{SOURCE_LABEL[s.source]}</b>
-                                <span>— {s.text}</span>
+                {data.steps.length > 0 && (
+                    <div className="run-steps">
+                        {data.steps.map((step) => (
+                            <div key={step.id} className="step-line">
+                                <span className={`dot ${step.text.toLowerCase().includes("failed") ? "failed" : step.text.toLowerCase().includes("success") ? "done" : "pending"}`} />
+                                <b>{SOURCE_LABEL[step.source]}</b>
+                                <span>— {step.text}</span>
                             </div>
-                        );
-                    })}
-                    {!finished && shown === 0 && <div className="step-line muted">Starting investigation...</div>}
-                </div>
+                        ))}
+                    </div>
+                )}
 
                 {/* Results */}
                 {finished ? (
@@ -155,7 +135,7 @@ const InvestigationDetail = ({ id, onBack }: Props) => {
                         </div>
                     </div>
                 ) : (
-                    shown > 0 && <div className="run-gathering"><Spin size="small" /> Gathering evidence...</div>
+                    <div className="run-gathering"><Spin size="small" /> Investigation is still running. Results will appear when the API reports completion.</div>
                 )}
             </div>
 

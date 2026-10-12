@@ -8,6 +8,7 @@ import com.connectai.mcp.api.dto.McpToolExecutionRequest;
 import com.connectai.mcp.api.dto.McpToolExecutionResponse;
 import io.modelcontextprotocol.spec.McpSchema;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -20,17 +21,20 @@ import java.util.List;
  */
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class McpToolExecutionAdapter implements ToolExecutionPort {
 
     private final McpToolExecutionService executionService;
 
     @Override
     public ToolExecutionResult execute(ToolExecutionRequest request) {
+        log.debug("Agent-to-MCP adapter invoked: serverId={}, toolName={}, argumentKeys={}", request.serverId(), request.toolName(), request.arguments() == null ? List.of() : request.arguments().keySet());
         McpToolExecutionResponse response = executionService.execute(
                 request.serverId(),
                 request.toolName(),
                 new McpToolExecutionRequest(request.arguments()));
 
+        log.debug("Agent-to-MCP adapter received response: toolName={}, isError={}, contentItems={}", response.toolName(), response.isError(), response.content() == null ? 0 : response.content().size());
         return new ToolExecutionResult(
                 response.toolName(),
                 response.isError(),
