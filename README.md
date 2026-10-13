@@ -53,6 +53,8 @@ Then open http://localhost:5173 → **Connections** → add the GitHub MCP serve
 | `CONNECTAI_MCP_REQUEST_TIMEOUT_SECONDS` / `..._CONNECT_TIMEOUT_SECONDS` | `20` / `10` | MCP calls |
 | `CONNECTAI_MCP_ALLOW_PRIVATE_HOSTS` | `false` | Allows explicitly configured private/local MCP destinations; keep disabled unless required. |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | unset | Required to enable Google Drive sign-in. |
+| `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` | unset | Optional; enables GitHub OAuth sign-in. GitHub PAT auth remains available without these. |
+| `GITHUB_OAUTH_SCOPES` | `repo read:org read:user` | GitHub OAuth scopes requested by the configured server-side OAuth app. Review carefully before enabling. |
 | `CONNECTAI_OAUTH_REDIRECT_URI` | `http://localhost:8080/connect-ai/api/oauth/callback` | Exact OAuth callback registered with the provider. |
 | `CONNECTAI_FRONTEND_ORIGIN` | `http://localhost:5173` | Exact frontend origin allowed to receive the OAuth popup message. |
 | `CONNECTAI_CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Only needed without the Vite proxy |
@@ -72,32 +74,16 @@ In **Connections → Add a Tool → GitHub** (or a custom server):
 - Authentication: Bearer token = a GitHub personal access token with the scopes you want the agent to use.
   The token is encrypted at rest and never returned by the API.
 
-#### Sign in with GitHub (OAuth) instead of pasting a token
+#### GitHub authentication
 
-Each tool can be connected either with an **access token** or, where an OAuth provider is configured,
-with **Sign in with GitHub** (Authorization Code + PKCE; the token is exchanged and stored encrypted by
-the backend and never shown or returned).
-
-One-time setup by whoever runs the backend:
-
-1. GitHub → Settings → Developer settings → **OAuth Apps → New OAuth App**.
-   Homepage URL `http://localhost:5173`, **Authorization callback URL
-   `http://localhost:8080/connect-ai/api/oauth/callback`** (must match `connectai.oauth.redirect-uri`).
-2. Generate a client secret.
-3. Put the client id/secret in `server/config/application.yml` (git-ignored; see
-   `server/config-example/application.yml`) or set `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET`,
-   then restart the backend. `GET /api/oauth/providers` then reports `"configured": true`.
-
-Then: Connections → GitHub → *Sign in with GitHub* → approve in the popup → the connection is tested and
-saved. **Re-authorize** on the connection's page replaces the token (e.g. after revoking it on GitHub).
-Scopes default to `repo read:org read:user` (`GITHUB_OAUTH_SCOPES`); investigations still only use
-read-only tools. The shared provider configuration supports `authorize-url`, `token-url`, `client-id`,
-`client-secret`, `scopes`, optional `access-type`, `revocation-url`, `pkce`, `client-authentication` (`client_secret_post`
-or `client_secret_basic`), `authorization-parameters`, and `token-parameters`. Provider endpoints must
-use HTTPS; HTTP is accepted only for loopback test providers. Reserved OAuth protocol fields cannot be
-overridden by extra parameters. Provider credentials must be pre-registered; dynamic client registration
-is not implemented. Add a provider under `connectai.oauth.providers.<id>` and reference its ID from a
-catalog entry's `oauthProvider`. Verify each provider's scopes and token behavior against its official docs.
+Use the GitHub catalog form with a fine-grained personal access token. Connect AI sends it as a bearer
+token and stores it encrypted only after the GitHub MCP endpoint passes MCP initialization and tool
+discovery. OAuth sign-in is also available when the backend is configured with `GITHUB_OAUTH_CLIENT_ID`
+and `GITHUB_OAUTH_CLIENT_SECRET`; register the exact `CONNECTAI_OAUTH_REDIRECT_URI` (local default
+`http://localhost:8080/connect-ai/api/oauth/callback`) in the GitHub OAuth app. OAuth uses the app's
+preconfigured authorization and token endpoints; this implementation does not discover OAuth metadata.
+The callback reports success only after authenticated MCP initialization and tool discovery. See the
+[official host integration guide](https://github.com/github/github-mcp-server/blob/main/docs/host-integration.md).
 
 #### Connect Google Drive MCP
 
@@ -124,24 +110,23 @@ scope. To verify manually, choose a specifically named non-sensitive test docume
 find and summarize that file; inspect that the steps used `search_files` and then `read_file_content` and
 that evidence references the selected file. Do not ask the test to create, copy, or edit a file.
 
-Also set `CONNECTAI_ENCRYPTION_KEY` before starting the backend. OAuth success means Google issued a
-token; it does not mean the Drive MCP endpoint initialized. The connection wizard separately reports
-MCP handshake and tool discovery results. Disconnect closes the MCP session but preserves authorization
+Also set `CONNECTAI_ENCRYPTION_KEY` before starting the backend. The callback reports success only after
+Google issued a token and the Drive MCP endpoint initialized and returned its tool list. Disconnect closes the MCP session but preserves authorization
 for reconnect; removing the saved connection attempts provider revocation when its provider config has a
 `revocation-url`, then deletes its locally encrypted token. The Google provider is configured with Google's
 revocation endpoint; GitHub revocation is not configured. Google documents that revocation may invalidate
 issued access and refresh tokens for the OAuth project, so other connections using the same project may
 also need authorization again.
 
-GitHub and Google Drive have provider implementations; each is available only when its backend OAuth
-client credentials are configured. Other catalog entries are not OAuth-ready unless their provider is
-explicitly configured and tested. Dynamic OAuth client registration and application user accounts are
-not implemented; the callback is browser-bound and tied to the initiating saved connection.
+Google Drive has a static OAuth provider implementation. GitHub OAuth 2.1 discovery and dynamic client
+registration are not implemented. Other catalog entries are not OAuth-ready unless their provider is
+explicitly configured and tested. Application user accounts are not implemented; the callback is
+browser-bound and tied to the initiating saved connection.
 Authorization attempts are held in short-lived process memory, so restarting the server or routing the
 callback to another backend instance requires starting sign-in again. Expired/revoked credentials are
 shown as **Sign-in expired** and require reauthorization before reconnecting.
 
-"Connected" is only shown after a completed MCP `initialize` handshake. Live sessions do not survive a
+"Connected" is only shown after a completed MCP `initialize` handshake and tool discovery. Live sessions do not survive a
 backend restart: after a restart every server shows **Disconnected** with an explanation; click **Reconnect**.
 
 ## How an investigation runs
@@ -250,8 +235,9 @@ For token or unauthenticated connections the wizard first calls `POST /connect-a
 That endpoint performs a temporary Streamable HTTP MCP initialize and paginated tool discovery without
 persisting a connection. On success, `POST /connect-ai/api/connections` encrypts credentials server-side,
 connects, discovers tools, and saves the connection. The legacy `/api/tools` registration and OAuth routes
-remain for compatibility. OAuth discovery and dynamic client registration are not implemented; OAuth
-catalog entries use only a configured static provider from `connectai.oauth.providers`.
+remain for compatibility. OAuth discovery and dynamic client registration are not implemented; Google
+Drive uses its configured static provider and now verifies MCP and discovers tools in the callback before
+the attempt is marked successful.
 
 Authentication configuration is encrypted in the database. `CONNECTAI_ENCRYPTION_KEY` must remain stable
 to decrypt stored connection credentials. Remote MCP endpoints must use HTTPS. The backend rejects DNS

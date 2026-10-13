@@ -23,9 +23,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Owns the lifecycle of live MCP sessions: connect (real handshake), disconnect and status.
+ * Owns the lifecycle of live MCP sessions: connect (real handshake and tool discovery), disconnect and status.
  *
- * Persisted status is only ever CONNECTED after a completed initialize handshake, and a
+ * Persisted status is only ever CONNECTED after a completed initialize handshake and tools/list, and a
  * persisted CONNECTED without a live runtime session (for example after a backend restart)
  * is reported and stored as DISCONNECTED rather than being trusted.
  *
@@ -43,6 +43,7 @@ public class McpConnectionService {
     private final McpClientFactory clientFactory;
     private final McpClientRegistry clientRegistry;
     private final OAuthService oauth;
+    private final McpToolDiscoveryService discovery;
     private final Map<UUID, Object> locks = new ConcurrentHashMap<>();
 
     @Autowired
@@ -50,11 +51,22 @@ public class McpConnectionService {
             McpServerRepository repository,
             McpClientFactory clientFactory,
             McpClientRegistry clientRegistry,
-            OAuthService oauth) {
+            OAuthService oauth,
+            McpToolDiscoveryService discovery) {
         this.repository = repository;
         this.clientFactory = clientFactory;
         this.clientRegistry = clientRegistry;
         this.oauth = oauth;
+        this.discovery = discovery;
+    }
+
+    /** Constructor retained for focused tests and token-only service setups. */
+    public McpConnectionService(
+            McpServerRepository repository,
+            McpClientFactory clientFactory,
+            McpClientRegistry clientRegistry,
+            OAuthService oauth) {
+        this(repository, clientFactory, clientRegistry, oauth, null);
     }
 
     /** Constructor retained for focused tests and token-only service setups. */
@@ -62,7 +74,7 @@ public class McpConnectionService {
             McpServerRepository repository,
             McpClientFactory clientFactory,
             McpClientRegistry clientRegistry) {
-        this(repository, clientFactory, clientRegistry, null);
+        this(repository, clientFactory, clientRegistry, null, null);
     }
 
     public McpConnectionResponse connect(UUID serverId) {
@@ -109,6 +121,7 @@ public class McpConnectionService {
 
             // Replaces (and closes) any previous session for this server.
             clientRegistry.register(serverId, client);
+            if (discovery != null) discovery.discover(serverId);
 
             server.markConnected();
             repository.save(server);
@@ -140,7 +153,9 @@ public class McpConnectionService {
             clientRegistry.remove(serverId).ifPresent(McpConnectionService::closeQuietly);
 
             String error = describeFailure(exception);
-            server.markFailed(error);
+            if (server.getStatus() != McpConnectionStatus.REAUTH_REQUIRED) {
+                server.markFailed(error);
+            }
             repository.save(server);
 
             log.warn(

@@ -43,6 +43,18 @@ class OAuthServiceTest {
     }
 
     @Test
+    void closingPopupCancelsOnlyTheUncompletedAuthorizationAttempt() {
+        Fixture fixture = new Fixture(600);
+        OAuthService.Started started = fixture.start();
+
+        OAuthService.Attempt cancelled = fixture.service.cancel(started.attemptId());
+
+        assertThat(cancelled.status()).isEqualTo(OAuthService.AttemptStatus.FAILED);
+        assertThat(cancelled.message()).contains("window was closed");
+        assertThat(fixture.service.attempt(started.attemptId())).isEqualTo(cancelled);
+    }
+
+    @Test
     void expiredOAuthAttemptCannotBeCompletedOrPolled() throws InterruptedException {
         Fixture fixture = new Fixture(1);
         OAuthService.Started started = fixture.start();

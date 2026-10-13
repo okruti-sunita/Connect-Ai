@@ -60,9 +60,12 @@ public class McpCatalogService {
                 }
             }
             String status = deriveStatus(definition, associated);
+            String statusReason = deriveStatusReason(definition, associated, providerReady);
+            boolean adminSetupRequired = !providerReady && definition.hasNonNull("requiredServerSettings")
+                    && !hasSupportedNonOAuthMethod(definition);
             result.add(new CatalogItemView(definition, associated.size(), status,
                     associated.stream().map(server -> com.connectai.mcp.model.McpServer.from(
-                            server, clients.isConnected(server.getId()))).toList()));
+                            server, clients.isConnected(server.getId()))).toList(), statusReason, adminSetupRequired));
         }
         return List.copyOf(result);
     }
@@ -86,6 +89,59 @@ public class McpCatalogService {
         }
         if (!supported) return "SETUP_REQUIRED";
         return "AVAILABLE";
+    }
+
+    private String deriveStatusReason(JsonNode definition, List<EMcpServer> associated, boolean providerReady) {
+        if (associated.stream().anyMatch(server -> clients.isConnected(server.getId()))) {
+            return "A live MCP session is connected and tools were discovered.";
+        }
+        if (associated.stream().anyMatch(server -> server.getStatus() == McpConnectionStatus.REAUTH_REQUIRED)) {
+            return "The saved authorization has expired or was rejected. Re-authorize this connection.";
+        }
+        if (associated.stream().anyMatch(server -> server.getStatus() == McpConnectionStatus.FAILED)) {
+            return associated.stream().filter(server -> server.getStatus() == McpConnectionStatus.FAILED)
+                    .map(EMcpServer::getLastError).filter(java.util.Objects::nonNull).findFirst()
+                    .orElse("The last MCP connection attempt failed. Test the endpoint and credentials.");
+        }
+        boolean anySupported = false;
+        for (JsonNode method : definition.path("methods")) anySupported |= method.path("supported").asBoolean(false);
+        if (!providerReady && definition.hasNonNull("requiredServerSettings")) {
+            List<String> settings = new ArrayList<>();
+            for (JsonNode setting : definition.path("requiredServerSettings")) settings.add(setting.asText());
+            String setup = "A server administrator must configure " + String.join(", ", settings)
+                    + " before provider sign-in can be used. Register this callback URI with the provider: "
+                    + oauth.redirectUri() + ".";
+            if (!anySupported) return setup;
+            String supported = "Ready to connect using " + firstSupportedLabel(definition) + ". ";
+            return supported + "To enable provider sign-in, " + setup.substring(0, 1).toLowerCase()
+                    + setup.substring(1);
+        }
+        if (!anySupported && definition.hasNonNull("unavailableReason")) {
+            return definition.path("unavailableReason").asText();
+        }
+        if (!providerReady && definition.hasNonNull("unavailableReason")) {
+            return definition.path("unavailableReason").asText();
+        }
+        return "Ready to connect using " + firstSupportedLabel(definition) + ".";
+    }
+
+    private static String firstSupportedLabel(JsonNode definition) {
+        String firstSupportedLabel = "the supported connection method";
+        for (JsonNode method : definition.path("methods")) {
+            if (method.path("supported").asBoolean(false)) {
+                firstSupportedLabel = method.path("label").asText(firstSupportedLabel);
+                break;
+            }
+        }
+        return firstSupportedLabel;
+    }
+
+    private static boolean hasSupportedNonOAuthMethod(JsonNode definition) {
+        for (JsonNode method : definition.path("methods")) {
+            if (method.path("supported").asBoolean(false)
+                    && !"OAUTH_APP".equals(method.path("id").asText())) return true;
+        }
+        return false;
     }
 
     private static boolean belongsTo(EMcpServer server, String key, String displayName) {
@@ -130,5 +186,6 @@ public class McpCatalogService {
     }
 
     public record CatalogItemView(JsonNode connector, int connectionCount, String status,
-                                  List<com.connectai.mcp.model.McpServer> connections) { }
+                                  List<com.connectai.mcp.model.McpServer> connections,
+                                  String statusReason, boolean adminSetupRequired) { }
 }

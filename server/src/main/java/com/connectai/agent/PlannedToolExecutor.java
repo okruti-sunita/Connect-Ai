@@ -116,12 +116,11 @@ public class PlannedToolExecutor {
         if (message == null || message.isBlank()) {
             message = exception.getClass().getSimpleName();
         }
-        return truncate(message);
+        return SafeDiagnostic.sanitize(message, MAX_ERROR_CHARS);
     }
 
     private static String truncate(String value) {
-        String oneLine = value.replaceAll("\\s+", " ").trim();
-        return oneLine.length() <= MAX_ERROR_CHARS ? oneLine : oneLine.substring(0, MAX_ERROR_CHARS) + "...";
+        return SafeDiagnostic.sanitize(value, MAX_ERROR_CHARS);
     }
 
     private static long elapsedMs(long startedNanos) {

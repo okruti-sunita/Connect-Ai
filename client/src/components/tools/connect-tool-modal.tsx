@@ -32,7 +32,7 @@ interface TestState {
 
 const TOKEN_STAGES = ['Testing the endpoint', 'Initializing MCP', 'Discovering tools', 'Saving the connection'];
 const oauthStages = (provider: string) =>
-    ['Registering the connection', `Signing in with ${provider}`, 'Connecting to the server', 'Discovering capabilities'];
+    ['Registering the connection', `Authorizing ${provider} and verifying MCP`, 'Loading discovered tools'];
 
 interface WizardProps {
     item: CatalogItem;
@@ -58,6 +58,7 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
     const [step, setStep] = useState<1 | 2>(1);
     const [test, setTest] = useState<TestState | null>(null);
     const alive = useRef(true);
+    const activePopup = useRef<Window | null>(null);
     // Remembers the tool created during this session so "Retry" does not register a duplicate.
     const registered = useRef<{ id: string; fingerprint: string } | null>(null);
     const onChangedRef = useRef(onChanged);
@@ -95,7 +96,7 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
         return () => {
             alive = false;
         };
-    }, [item.oauthProvider, form]);
+    }, [item.methods, item.oauthProvider, form]);
     const defaultMethod = item.methods.find((method) => method.supported)?.id ?? 'NONE';
     const connectMethod: ConnectMethod = isCustom || externalMcpRequired || !item.oauthProvider
         ? watchedConnectionMethod ?? defaultMethod
@@ -135,16 +136,10 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                 const id = registered.current.id;
                 stage = 1;
                 set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
-                // The backend exchanges the code and stores the token; this only waits for the outcome.
+                // The callback exchanges the code, stores it, handshakes with MCP, and discovers tools.
                 const signIn = await signInWithPopup(id, popup);
                 if (!signIn.ok) throw new ToolsApiError(signIn.message, 401);
                 stage = 2;
-                set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
-                const connection = await toolsApi.connect(id);
-                if (!connection?.initialized) {
-                    throw new ToolsApiError(connection?.error ?? 'The MCP server did not complete the handshake.', 502);
-                }
-                stage = 3;
                 set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
                 const capabilities = await toolsApi.capabilities(id);
                 set({phase: 'success', stage: stages.length, capabilities, capabilitiesFailed: false});
@@ -195,13 +190,22 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
     const handleTest = async () => {
         // The popup must be opened synchronously in the click, before any await, or it is blocked.
         const popup = authType === 'OAUTH' ? openSignInPopup() : null;
+        activePopup.current = popup;
         try {
             await form.validateFields();
         } catch {
             popup?.close();
+            activePopup.current = null;
             return;
         }
-        void runTest(popup);
+        void runTest(popup).finally(() => {
+            if (activePopup.current === popup) activePopup.current = null;
+        });
+    };
+
+    const handleCancel = () => {
+        if (activePopup.current && !activePopup.current.closed) activePopup.current.close();
+        onClose();
     };
 
     const handleFinish = () => {
@@ -219,14 +223,15 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
         const input = field.type === 'password'
             ? <Input.Password placeholder={field.placeholder} autoComplete="new-password"/>
             : <Input placeholder={field.placeholder} autoComplete="off"/>;
+        const isRequired = required || field.required;
         return <Form.Item key={name} label={field.label} name={name} extra={field.helpText}
-                          rules={required ? [{required: true, whitespace: true, message: `Enter ${field.label.toLowerCase()}`}] : undefined}>
+                          rules={isRequired ? [{required: true, whitespace: true, message: `Enter ${field.label.toLowerCase()}`}] : undefined}>
             {input}
         </Form.Item>;
     };
 
     return (
-        <div className="wizard">
+        <div className={authType === 'OAUTH' ? 'wizard oauth-mode' : 'wizard'}>
             <header className="wizard-head">
                 <ToolLogo name={item.name} item={item} size={52}/>
                 <div>
@@ -245,7 +250,7 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
 
             <div className="wizard-body">
                 <section className="wizard-main">
-                    <div hidden={step !== 1}>
+                    <div hidden={step !== 1 || authType === 'OAUTH'}>
                         <h3>Configuration</h3>
                         <Form<FormValues>
                             form={form}
@@ -323,9 +328,9 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                             {!isCustom && item.oauthProvider && (
                                 <Form.Item label="How should Connect AI access it?" name="authMethod"
                                            extra={oauthReady === false && !oauthAlternative
-                                               ? `Sign-in with ${item.name} is not configured on this server yet. Ask the administrator to configure the OAuth client.`
+                                               ? `Administrator setup required: configure ${item.requiredServerSettings?.join(', ') || 'the provider OAuth client'} on the backend and register this callback URI with ${item.name}: ${oauthProvider?.redirectUri ?? 'the backend configured redirect URI'}.`
                                                : oauthReady === false
-                                                   ? `Sign-in with ${item.name} is not configured on this server yet. An access token is available as an alternative.`
+                                                   ? `Sign-in with ${item.name} is not configured on this server. You can connect now with the token method. To enable provider sign-in, configure ${item.requiredServerSettings?.join(', ') || 'the provider OAuth client'} and register ${oauthProvider?.redirectUri ?? 'the backend configured redirect URI'}.`
                                                : authType === 'OAUTH'
                                                    ? `Requested access: ${oauthProvider?.scopes?.join(', ') || 'provider-defined scopes'}. A ${item.name} window opens; approve access there. No token to copy.`
                                                    : undefined}>
@@ -363,7 +368,58 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                         <p className="secure-note"><ShieldCheck size={16}/>Credentials are encrypted at rest and never sent to the LLM.</p>
                     </div>
 
-                    {step === 2 && test && (
+                    {authType === 'OAUTH' && (
+                        <section className="oauth-journey" aria-label={`${item.name} sign-in progress`}>
+                            <div className="oauth-journey-grid">
+                                <article className={`oauth-stage-card ${test?.phase === 'success' || (test && test.stage > 0) ? 'complete' : !test || test.phase === 'failed' ? 'active' : ''}`}>
+                                    <span className="oauth-stage-label">1 Start</span>
+                                    <div className="oauth-stage-title"><ToolLogo name={item.name} item={item} size={44}/><strong>Connect {item.name}</strong></div>
+                                    <p>You’ll sign in on {item.name}. Connect AI never sees your password.</p>
+                                    <div className="oauth-permissions">
+                                        {item.scopes.slice(0, 2).map((scope) => <span key={scope}><Check size={15}/>{scope}</span>)}
+                                        <span><ShieldCheck size={15}/>Credentials stay on the server</span>
+                                    </div>
+                                    <Button type="primary" block disabled={running || oauthReady !== true} loading={running && test?.stage === 0}
+                                            onClick={handleTest}>
+                                        {running ? 'Authorization in progress' : test?.phase === 'failed' ? 'Try again' : `Continue with ${item.name}`}
+                                    </Button>
+                                    {oauthAlternative && <button type="button" className="oauth-link-button" disabled={running}
+                                        onClick={() => { form.setFieldValue('authMethod', 'token'); setTest(null); setStep(1); }}>
+                                        Use an access token instead
+                                    </button>}
+                                    {test?.phase === 'failed' && test.stage === 0 && <p className="oauth-stage-error" role="alert">{test.error}</p>}
+                                </article>
+                                <article className={`oauth-stage-card ${test?.phase === 'success' || (test && test.stage > 1) ? 'complete' : test?.phase === 'running' && test.stage === 1 ? 'active' : ''}`}>
+                                    <span className="oauth-stage-label">2 Sign in</span>
+                                    <div className="oauth-stage-title"><ToolLogo name={item.name} item={item} size={44}/><strong>{test?.phase === 'running' && test.stage === 1 ? `Waiting for ${item.name}` : `Sign in to ${item.name}`}</strong></div>
+                                    <div className={`oauth-wait-panel ${test?.phase === 'running' && test.stage === 1 ? 'waiting' : ''}`}>
+                                        <span className="oauth-spinner" aria-hidden="true"/>
+                                        <span>{test?.phase === 'running' && test.stage === 1 ? 'Finish signing in in the pop-up window' : 'A secure sign-in window opens when you continue.'}</span>
+                                    </div>
+                                    {test?.phase === 'failed' && test.stage === 1 && <p className="oauth-stage-error" role="alert">{test.error}</p>}
+                                    {test?.phase === 'running' && <p className="oauth-stage-hint">You can return here after approving access.</p>}
+                                </article>
+                                <article className={`oauth-stage-card ${test?.phase === 'success' ? 'complete' : test?.phase === 'running' && test.stage >= 2 ? 'active' : ''}`}>
+                                    <span className="oauth-stage-label">3 Done</span>
+                                    <div className="oauth-stage-title"><span className={`oauth-done-icon ${test?.phase === 'success' ? 'ready' : ''}`}>{test?.phase === 'success' ? <Check size={22}/> : <span className="oauth-spinner"/>}</span><strong>{test?.phase === 'success' ? `${item.name} connected` : 'MCP tools verified'}</strong></div>
+                                    {test?.phase === 'success' ? (
+                                        <>
+                                            <p>{test.capabilities.length} tools found and ready to use.</p>
+                                            <ul className="oauth-tool-preview">{test.capabilities.slice(0, 3).map((capability) => <li key={capability.name}>{capability.name}</li>)}</ul>
+                                            <Button block onClick={handleFinish}>Done</Button>
+                                        </>
+                                    ) : test?.phase === 'failed' && test.stage >= 2 ? (
+                                        <p className="oauth-stage-error" role="alert">{test.error}</p>
+                                    ) : (
+                                        <p>After sign-in, Connect AI verifies the MCP connection and discovers available tools.</p>
+                                    )}
+                                </article>
+                            </div>
+                            {oauthReady === false && <p className="oauth-admin-setup" role="status">{item.statusReason}</p>}
+                        </section>
+                    )}
+
+                    {step === 2 && test && authType !== 'OAUTH' && (
                         <div>
                             <h3>Test connection</h3>
                             <ol className="test-list" aria-live="polite">
@@ -426,10 +482,14 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
             </div>
 
             <footer className="wizard-foot">
-                {step === 1 ? (
+                {authType === 'OAUTH' ? (
                     <>
-                        <Button onClick={onClose}>Cancel</Button>
-                        <Button type="primary" disabled={authType === 'OAUTH' && oauthReady !== true} onClick={handleTest}>Test Connection</Button>
+                        <Button onClick={handleCancel}>Cancel</Button>
+                    </>
+                ) : step === 1 ? (
+                    <>
+                        <Button onClick={handleCancel}>Cancel</Button>
+                        <Button type="primary" onClick={handleTest}>Test Connection</Button>
                     </>
                 ) : (
                     <>
@@ -437,7 +497,7 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                         {test?.phase === 'success' ? (
                             <Button type="primary" onClick={handleFinish}>Save &amp; Finish</Button>
                         ) : (
-                            <Button type="primary" disabled={running} loading={running} onClick={() => void runTest(authType === 'OAUTH' ? openSignInPopup() : null)}>
+                            <Button type="primary" disabled={running} loading={running} onClick={() => void runTest(null)}>
                                 {running ? 'Testing' : 'Retry test'}
                             </Button>
                         )}

@@ -188,7 +188,7 @@ public class LlmGroundedAnswerGenerator implements GroundedAnswerGenerator {
         } catch (RuntimeException exception) {
             log.warn(
                     "LLM grounded answer failed ({}); using deterministic fallback",
-                    exception.getMessage());
+                    com.connectai.agent.SafeDiagnostic.message(exception, 500));
             return fallback.generate(state, runHints);
         }
     }

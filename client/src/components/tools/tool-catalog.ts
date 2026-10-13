@@ -45,8 +45,11 @@ export interface CatalogItem {
     help: {steps: string[]; docsUrl: string};
     scopes: string[];
     oauthProvider?: string;
+    requiredServerSettings?: string[];
     connectionCount: number;
     status: ConnectorStatus;
+    statusReason: string;
+    adminSetupRequired: boolean;
     badge: string;
     color: string;
     logoUrl?: string;
@@ -80,6 +83,7 @@ export interface CatalogConnectorDefinition {
     help: {steps: string[]; docsUrl: string};
     scopes: string[];
     oauthProvider?: string;
+    requiredServerSettings?: string[];
 }
 
 export interface CatalogApiEntry {
@@ -87,6 +91,8 @@ export interface CatalogApiEntry {
     connectionCount: number;
     status: ConnectorStatus;
     connections: CatalogConnectionSummary[];
+    statusReason: string;
+    adminSetupRequired: boolean;
 }
 
 export interface CatalogConnectionSummary {
@@ -114,6 +120,8 @@ export function mapCatalogEntry(entry: CatalogApiEntry): CatalogItem {
         id: connector.key,
         connectionCount: entry.connectionCount,
         status: entry.status,
+        statusReason: entry.statusReason,
+        adminSetupRequired: entry.adminSetupRequired,
         badge: connector.name.slice(0, 2).toUpperCase(),
         color: CATEGORY_COLORS[connector.category] ?? '#475569',
         blurb: connector.description,

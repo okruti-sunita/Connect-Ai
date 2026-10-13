@@ -84,11 +84,12 @@ export interface OAuthProviderDto {
     configured: boolean;
     /** Requested OAuth permissions, safe to display before sign-in. */
     scopes: string[];
+    redirectUri: string;
 }
 
 export interface OAuthAttemptDto {
     id: string;
-    status: 'PENDING' | 'SUCCEEDED' | 'FAILED';
+    status: 'PENDING' | 'CONNECTING' | 'SUCCEEDED' | 'FAILED';
     message: string;
 }
 
@@ -140,6 +141,8 @@ export const toolsApi = {
     startOAuth: (id: string) => apiRequest<OAuthStartDto>(
         `/tools/${id}/oauth/start`, 'POST', undefined, undefined, 'include'),
     oauthAttempt: (attemptId: string) => request<OAuthAttemptDto>(`/oauth/attempts/${encodeURIComponent(attemptId)}`),
+    cancelOAuthAttempt: (attemptId: string) => request<OAuthAttemptDto>(
+        `/oauth/attempts/${encodeURIComponent(attemptId)}/cancel`, 'POST'),
     /** Deletes the saved connection and its token. The backend answers 409 while it is still connected. */
     remove: (id: string) => request<void>(`/tools/${id}`, 'DELETE'),
     connection: (id: string, signal?: AbortSignal) =>

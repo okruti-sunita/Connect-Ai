@@ -49,7 +49,7 @@ const ToolsView = () => {
         void refresh();
     }, [refresh]);
 
-    /** OAuth connections: sign in (again) in a popup, then (re)connect with the new token. */
+    /** OAuth callback exchanges the token, reconnects MCP, and discovers tools before it succeeds. */
     const signIn = (tool: McpServerDto) => {
         const popup = openSignInPopup(); // synchronously inside the click, or the browser blocks it
         void (async () => {
@@ -60,10 +60,7 @@ const ToolsView = () => {
                     message.error(result.message);
                     return;
                 }
-                if (tool.runtimeConnected) await toolsApi.disconnect(tool.id);
-                const connection = await toolsApi.connect(tool.id);
-                if (connection?.initialized) message.success(`${tool.name} signed in and connected.`);
-                else message.error(`${tool.name} signed in, but could not connect${connection?.error ? `: ${connection.error}` : '.'}`);
+                message.success(`${tool.name} signed in, connected, and tools were discovered.`);
             } catch (error) {
                 message.error(error instanceof Error ? error.message : 'Sign-in failed.');
             } finally {
@@ -234,16 +231,20 @@ const ToolsView = () => {
             <div className="catalog-grid">
                 {catalog.map((item) => {
                     const added = item.connectionCount > 0 || tools.some((t) => t.catalogKey === item.key);
-                    const method = item.methods.find((candidate) => candidate.supported);
+                    const availableMethod = item.methods.find((candidate) => candidate.supported);
+                    const cardStatus = item.adminSetupRequired ? 'Administrator setup required'
+                        : item.status === 'AVAILABLE' ? `Ready to connect${availableMethod ? ` using ${availableMethod.label}` : ''}`
+                            : item.status === 'NEEDS_SIGN_IN' ? 'Sign-in required'
+                                : item.status === 'CONNECTED' ? 'Connected'
+                                    : item.status === 'CONNECTION_ERROR' ? 'Connection failed' : 'Setup required';
                     return (
                         <article key={item.id} className="catalog-card">
                             <div className="catalog-top"><ToolLogo name={item.name} item={item} size={36}/><h3>{item.name}</h3></div>
                             <p>{item.description}</p>
+                            <p className={`catalog-state${item.adminSetupRequired ? ' admin-setup' : ''}`} title={item.statusReason}>{cardStatus}</p>
                             <div className="catalog-foot">
                                 <span className="pill">{item.category}</span>
-                                <span className="pill">{method?.label ?? 'Setup required'}</span>
-                                <span className="pill">{item.status.replaceAll('_', ' ').toLowerCase()}</span>
-                                <button type="button" className="link-btn" disabled={!method}
+                                <button type="button" className="link-btn" disabled={!item.methods.some((candidate) => candidate.supported)}
                                         onClick={() => openWizard(item)}>{added ? 'Add another connection' : 'Connect'}</button>
                             </div>
                         </article>

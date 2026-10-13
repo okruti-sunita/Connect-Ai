@@ -7,6 +7,7 @@ import com.connectai.agent.ControlledAgentExecutor;
 import com.connectai.agent.GroundedAnswer;
 import com.connectai.agent.GroundedAnswerGenerator;
 import com.connectai.agent.McpToolCandidate;
+import com.connectai.agent.SafeDiagnostic;
 import com.connectai.agent.ToolShortlister;
 import com.connectai.agent.analysis.IssueAnalysisEngine;
 import com.connectai.agent.fastpath.FastPathEngine;
@@ -135,8 +136,10 @@ public class InvestigationRunner {
                     investigationId, execution.status(), answer.grounded(), answer.fallbackUsed(),
                     (System.nanoTime() - started) / 1_000_000);
         } catch (Throwable throwable) {
-            log.error("Investigation run crashed: id={}, cause={}", investigationId, throwable.toString(), throwable);
-            store.fail(investigationId, "Investigation failed: " + safeMessage(throwable));
+            String safeError = SafeDiagnostic.message(throwable, 500);
+            log.error("Investigation run crashed: id={}, errorType={}, cause={}",
+                    investigationId, throwable.getClass().getSimpleName(), safeError);
+            store.fail(investigationId, "Investigation failed: " + safeError);
             if (throwable instanceof Error error && !(throwable instanceof StackOverflowError)) {
                 throw error;
             }
@@ -152,11 +155,4 @@ public class InvestigationRunner {
         return names;
     }
 
-    private static String safeMessage(Throwable throwable) {
-        String message = throwable.getMessage();
-        if (message == null || message.isBlank()) {
-            message = throwable.getClass().getSimpleName();
-        }
-        return message.length() > 500 ? message.substring(0, 500) + "..." : message;
-    }
 }

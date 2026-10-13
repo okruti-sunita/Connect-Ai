@@ -34,10 +34,13 @@ public class OAuthResource {
 
     private final OAuthService oauth;
     private final OAuthProperties properties;
+    private final com.connectai.mcp.client.McpConnectionService connections;
 
-    public OAuthResource(OAuthService oauth, OAuthProperties properties) {
+    public OAuthResource(OAuthService oauth, OAuthProperties properties,
+                         com.connectai.mcp.client.McpConnectionService connections) {
         this.oauth = oauth;
         this.properties = properties;
+        this.connections = connections;
     }
 
     @GetMapping("/api/oauth/providers")
@@ -74,6 +77,11 @@ public class OAuthResource {
         return oauth.attempt(attemptId);
     }
 
+    @PostMapping("/api/oauth/attempts/{attemptId}/cancel")
+    public OAuthService.Attempt cancel(@PathVariable String attemptId) {
+        return oauth.cancel(attemptId);
+    }
+
     @GetMapping(value = "/api/oauth/callback", produces = MediaType.TEXT_HTML_VALUE)
     public ResponseEntity<String> callback(
             @RequestParam(required = false) String code,
@@ -93,6 +101,17 @@ public class OAuthResource {
             }
         }
         OAuthService.Attempt attempt = oauth.complete(state, code, error, errorDescription, bindingValue);
+        if (attempt.status() == OAuthService.AttemptStatus.CONNECTING) {
+            try {
+                var connection = connections.connect(attempt.serverId());
+                if (!connection.initialized()) throw new IllegalStateException("MCP initialization did not complete");
+                attempt = oauth.connectionResult(attempt.id(), true,
+                        "Connected and discovered MCP tools. You can close this window.");
+            } catch (RuntimeException failure) {
+                attempt = oauth.connectionResult(attempt.id(), false,
+                        "Sign-in succeeded, but the authenticated MCP connection or tool discovery failed. Check the endpoint and provider permissions, then retry the connection.");
+            }
+        }
         boolean ok = attempt.status() == OAuthService.AttemptStatus.SUCCEEDED;
         String message = HtmlUtils.htmlEscape(attempt.message());
         String attemptId = HtmlUtils.htmlEscape(attempt.id() == null ? "" : attempt.id());

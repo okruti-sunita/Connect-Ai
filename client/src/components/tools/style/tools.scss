@@ -254,15 +254,37 @@ $bad: #b91c1c;
     }
 
     p {
+      min-width: 0;
       margin: 0;
       color: $ink;
       flex: 1;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+
+    p.catalog-state {
+      min-height: 18px;
+      flex: 0 0 auto;
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.5;
+
+      &.admin-setup {
+        color: #9a3412;
+      }
     }
 
     .catalog-foot {
       display: flex;
-      justify-content: space-between;
+      justify-content: flex-start;
       align-items: center;
+      gap: 12px;
+      margin-top: auto;
+
+      .link-btn {
+        margin-left: auto;
+        flex: none;
+      }
     }
 
     &.custom {
@@ -420,6 +442,14 @@ $bad: #b91c1c;
 
   @media (max-width: 640px) {
     padding: 20px 16px;
+
+    .catalog-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .catalog-card {
+      min-width: 0;
+    }
   }
 }
 

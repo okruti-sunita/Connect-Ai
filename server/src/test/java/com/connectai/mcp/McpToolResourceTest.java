@@ -120,10 +120,24 @@ class McpToolResourceTest {
                 .andExpect(jsonPath("$[0].connectionCount").value(1))
                 .andExpect(jsonPath("$[0].status").value("AVAILABLE"))
                 .andExpect(jsonPath("$[0].connector.methods[0].id").value("OAUTH_APP"))
+                .andExpect(jsonPath("$[0].connector.methods[0].supported").value(false))
+                .andExpect(jsonPath("$[0].statusReason").value(org.hamcrest.Matchers.containsString("Ready to connect using Personal access token.")))
+                .andExpect(jsonPath("$[0].adminSetupRequired").value(false))
                 .andExpect(jsonPath("$[0].connector.clientSecret").doesNotExist());
 
         EMcpServer saved = repository.findAll().getFirst();
         assertEquals("github", saved.getCatalogKey());
+    }
+
+    @Test
+    void catalogDistinguishesGoogleServerSetupFromUserSignIn() throws Exception {
+        mvc.perform(get("/api/catalog"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[10].connector.key").value("google-drive"))
+                .andExpect(jsonPath("$[10].connector.methods[0].supported").value(false))
+                .andExpect(jsonPath("$[10].adminSetupRequired").value(true))
+                .andExpect(jsonPath("$[10].statusReason").value(org.hamcrest.Matchers.containsString("GOOGLE_OAUTH_CLIENT_ID")))
+                .andExpect(jsonPath("$[10].connector.requiredServerSettings[1]").value("GOOGLE_OAUTH_CLIENT_SECRET"));
     }
 
     @Test

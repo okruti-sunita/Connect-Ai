@@ -2,8 +2,6 @@ import {toolsApi} from './tools-api';
 
 const POLL_MS = 1500;
 const TIMEOUT_MS = 10 * 60 * 1000;
-/** After the popup closes, keep checking briefly: the result may land just after it closed. */
-const AFTER_CLOSE_GRACE_MS = 4000;
 
 /**
  * Opens an empty popup. Call this directly inside the click handler, before any await,
@@ -49,14 +47,14 @@ export async function signInWithPopup(serverId: string, popup: Window | null): P
         window.addEventListener('message', onMessage);
         popup.location.href = started.authorizationUrl;
         const startedAt = Date.now();
-        let closedAt: number | null = null;
+        let cancellationRequested = false;
         try {
             while (Date.now() - startedAt < TIMEOUT_MS) {
                 if (!callbackReceived) await new Promise((resolve) => setTimeout(resolve, POLL_MS));
                 callbackReceived = false;
                 try {
                     const attempt = await toolsApi.oauthAttempt(attemptId);
-                    if (attempt.status !== 'PENDING') {
+                    if (attempt.status === 'SUCCEEDED' || attempt.status === 'FAILED') {
                         if (!popup.closed) popup.close();
                         return {ok: attempt.status === 'SUCCEEDED', message: attempt.message};
                     }
@@ -64,9 +62,10 @@ export async function signInWithPopup(serverId: string, popup: Window | null): P
                     return {ok: false, message: error instanceof Error ? error.message : 'Sign-in status is unavailable.'};
                 }
                 if (popup.closed) {
-                    closedAt ??= Date.now();
-                    if (Date.now() - closedAt > AFTER_CLOSE_GRACE_MS) {
-                        return {ok: false, message: 'The sign-in window was closed before access was granted.'};
+                    if (!cancellationRequested) {
+                        cancellationRequested = true;
+                        // If callback processing already began, cancellation is ignored and the true result is polled.
+                        void toolsApi.cancelOAuthAttempt(attemptId).catch(() => undefined);
                     }
                 }
             }

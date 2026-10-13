@@ -1,6 +1,7 @@
 package com.connectai.mcp.oauth;
 
 import com.connectai.mcp.entity.EMcpServer;
+import com.connectai.agent.SafeDiagnostic;
 import com.connectai.mcp.model.McpAuthType;
 import com.connectai.mcp.repository.McpServerRepository;
 import com.connectai.mcp.security.SecretEncryptionService;
@@ -52,11 +53,12 @@ import java.util.stream.Collectors;
 @Slf4j
 public class OAuthService {
 
-    public enum AttemptStatus { PENDING, SUCCEEDED, FAILED }
+    public enum AttemptStatus { PENDING, CONNECTING, SUCCEEDED, FAILED }
 
     public record Attempt(String id, UUID serverId, String providerId, AttemptStatus status, String message) { }
 
-    public record ProviderInfo(String id, String displayName, boolean configured, List<String> scopes) { }
+    public record ProviderInfo(String id, String displayName, boolean configured, List<String> scopes,
+                               String redirectUri) { }
 
     public record Started(String attemptId, String authorizationUrl, String cookieName, String cookieValue) { }
 
@@ -94,8 +96,13 @@ public class OAuthService {
         return properties.getProviders().entrySet().stream()
                 .map(e -> new ProviderInfo(e.getKey(),
                         e.getValue().getDisplayName() == null ? e.getKey() : e.getValue().getDisplayName(),
-                        e.getValue().isConfigured(), scopes(e.getValue())))
+                        e.getValue().isConfigured(), scopes(e.getValue()), properties.getRedirectUri()))
                 .toList();
+    }
+
+    /** Safe callback URI for setup guidance; contains no credentials. */
+    public String redirectUri() {
+        return properties.getRedirectUri();
     }
 
     /** Validates a provider id for a new OAUTH connection. */
@@ -201,11 +208,12 @@ public class OAuthService {
             }
             storeTokens(server, requestToken(provider, body), false);
             log.info("OAuth sign-in completed: serverId={}, provider={}", server.getId(), started.providerId());
-            return finish(state, started, AttemptStatus.SUCCEEDED, "Signed in. You can close this window.", null);
+            return finish(state, started, AttemptStatus.CONNECTING,
+                    "Sign-in succeeded. Verifying the authenticated MCP connection and discovering tools…", null);
         } catch (OAuthException exception) {
             log.warn("OAuth token exchange failed: serverId={}, provider={}, cause={}",
-                    server.getId(), started.providerId(), exception.getMessage());
-            return finish(state, started, AttemptStatus.FAILED, exception.getMessage(), server);
+                    server.getId(), started.providerId(), SafeDiagnostic.message(exception, 500));
+            return finish(state, started, AttemptStatus.FAILED, SafeDiagnostic.message(exception, 500), server);
         }
     }
 
@@ -221,6 +229,34 @@ public class OAuthService {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Unknown or expired sign-in attempt");
         }
         return attempt;
+    }
+
+    /** Cancels only an authorization that has not reached its callback; in-flight token/MCP work completes. */
+    public Attempt cancel(String attemptId) {
+        purgeExpired();
+        for (Map.Entry<String, Pending> entry : pending.entrySet()) {
+            Pending started = entry.getValue();
+            if (!started.attemptId().equals(attemptId)) continue;
+            Attempt current = outcomes.get(attemptId);
+            if (current == null || current.status() != AttemptStatus.PENDING) break;
+            if (pending.remove(entry.getKey(), started)) {
+                Attempt cancelled = new Attempt(attemptId, started.serverId(), started.providerId(),
+                        AttemptStatus.FAILED, "The sign-in window was closed before authorization completed.");
+                outcomes.replace(attemptId, current, cancelled);
+                return outcomes.get(attemptId);
+            }
+        }
+        return attempt(attemptId);
+    }
+
+    /** Callback completion is not successful until the authenticated MCP handshake and discovery finish. */
+    public Attempt connectionResult(String attemptId, boolean connected, String message) {
+        Attempt current = attempt(attemptId);
+        if (current.status() != AttemptStatus.CONNECTING) return current;
+        Attempt result = new Attempt(current.id(), current.serverId(), current.providerId(),
+                connected ? AttemptStatus.SUCCEEDED : AttemptStatus.FAILED, message);
+        outcomes.replace(attemptId, current, result);
+        return outcomes.get(attemptId);
     }
 
     /**
@@ -285,7 +321,8 @@ public class OAuthService {
                 log.info("OAuth token refreshed: serverId={}", server.getId());
             } catch (OAuthException exception) {
                 throw reauthorizationRequired(server,
-                        "Refreshing the sign-in failed: " + exception.getMessage() + " Re-authorize this connection.");
+                        "Refreshing the sign-in failed: " + SafeDiagnostic.message(exception, 300)
+                                + " Re-authorize this connection.");
             }
         }
         return encryption.decrypt(server.getEncryptedSecret());

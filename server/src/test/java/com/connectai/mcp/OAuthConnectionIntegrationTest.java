@@ -125,6 +125,18 @@ class OAuthConnectionIntegrationTest {
         assertThat(providers).anyMatch(p -> "google".equals(p.get("id"))
                 && ((java.util.List<?>) p.get("scopes")).contains("https://www.googleapis.com/auth/drive.readonly"));
         assertThat(providers).anyMatch(p -> "unconfigured".equals(p.get("id")) && Boolean.FALSE.equals(p.get("configured")));
+        var catalog = http.exchange("/api/catalog", HttpMethod.GET, null,
+                new ParameterizedTypeReference<java.util.List<Map<String, Object>>>() { }).getBody();
+        assertThat(catalog).anySatisfy(item -> assertThat(((Map<?, ?>) item.get("connector")).get("key"))
+                .isEqualTo("google-drive"));
+        assertThat(catalog).anySatisfy(item -> {
+            @SuppressWarnings("unchecked") Map<String, Object> connector = (Map<String, Object>) item.get("connector");
+            if (!"google-drive".equals(connector.get("key"))) return;
+            @SuppressWarnings("unchecked") var methods = (java.util.List<Map<String, Object>>) connector.get("methods");
+            assertThat(methods).anySatisfy(method -> assertThat(method)
+                    .containsEntry("id", "OAUTH_APP").containsEntry("supported", true));
+            assertThat(item).containsEntry("adminSetupRequired", false);
+        });
     }
 
     @Test
@@ -166,6 +178,8 @@ class OAuthConnectionIntegrationTest {
         ResponseEntity<String> page = callback("/api/oauth/callback?code=good-code&state=" + state, state);
         assertThat(page.getBody()).contains("Access granted");
         assertThat(attempt(attemptId).get("status")).isEqualTo("SUCCEEDED");
+        assertThat(connections.status(UUID.fromString(serverId)).initialized()).isTrue();
+        assertThat(discovery.discover(UUID.fromString(serverId)).tools()).isNotEmpty();
 
         Map<String, Object> tool = http.exchange("/api/tools/" + serverId, HttpMethod.GET, null, MAP).getBody();
         assertThat(tool).containsEntry("secretConfigured", true);
@@ -240,6 +254,8 @@ class OAuthConnectionIntegrationTest {
             String state = query.get("state");
             callback("/api/oauth/callback?code=google-code&state=" + state, state);
             assertThat(attempt(started.get("attemptId").toString())).containsEntry("status", "SUCCEEDED");
+            assertThat(connections.status(UUID.fromString(googleServerId)).initialized()).isTrue();
+            assertThat(discovery.discover(UUID.fromString(googleServerId)).tools()).isNotEmpty();
             String originalEncryptedRefreshToken = servers.findById(UUID.fromString(googleServerId)).orElseThrow()
                     .getEncryptedRefreshToken();
 
@@ -308,6 +324,7 @@ class OAuthConnectionIntegrationTest {
         CODE_CHALLENGES.put("revoke-code", query.get("code_challenge"));
         callback("/api/oauth/callback?code=revoke-code&state=" + state, state);
         LAST_REVOKED_TOKEN_VALID.set(false);
+        connections.disconnect(UUID.fromString(id));
 
         connections.remove(UUID.fromString(id));
 
@@ -321,10 +338,10 @@ class OAuthConnectionIntegrationTest {
         ResponseEntity<Map<String, Object>> created = register("Refresh failure", "fakegh");
         UUID id = UUID.fromString(created.getBody().get("id").toString());
         NEXT_EXPIRES_IN.set("10");
+        FAIL_REFRESH.set(true);
         String state = startStateFor(id.toString());
         CODE_CHALLENGES.put("expired-token-code", challengeOf(state));
         callback("/api/oauth/callback?code=expired-token-code&state=" + state, state);
-        FAIL_REFRESH.set(true);
         try {
             org.assertj.core.api.Assertions.assertThatThrownBy(() -> oauth.accessToken(servers.findById(id).orElseThrow()))
                     .isInstanceOf(IllegalStateException.class).hasMessageContaining("Re-authorize");
@@ -338,7 +355,7 @@ class OAuthConnectionIntegrationTest {
         String retryState = startStateFor(id.toString());
         CODE_CHALLENGES.put("retry-signin-code", challengeOf(retryState));
         callback("/api/oauth/callback?code=retry-signin-code&state=" + retryState, retryState);
-        assertThat(servers.findById(id).orElseThrow().getStatus().name()).isEqualTo("DISCONNECTED");
+        assertThat(servers.findById(id).orElseThrow().getStatus().name()).isEqualTo("CONNECTED");
         assertThat(servers.findById(id).orElseThrow().getLastError()).isNull();
     }
 

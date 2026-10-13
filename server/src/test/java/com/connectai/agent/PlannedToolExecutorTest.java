@@ -79,6 +79,19 @@ class PlannedToolExecutorTest {
     }
 
     @Test
+    void executeRedactsSecretsFromPersistableFailureMessage() {
+        ToolExecutionPort port = request -> {
+            throw new IllegalStateException("Request failed: access_token=super-secret-token");
+        };
+
+        AgentExecutionStep step = new PlannedToolExecutor(port).execute(4, plan());
+
+        assertThat(step.status()).isEqualTo(AgentStepStatus.FAILED);
+        assertThat(step.errorMessage()).contains("access_token=[REDACTED]")
+                .doesNotContain("super-secret-token");
+    }
+
+    @Test
     void execute_rejectsInvalidStepNumber() {
         ToolExecutionPort port = request ->
                 new ToolExecutionResult(

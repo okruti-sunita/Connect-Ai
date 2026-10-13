@@ -111,7 +111,7 @@ public class ControlledAgentExecutor {
             try {
                 decision = planner.decide(question, availableTools, state);
             } catch (RuntimeException exception) {
-                log.warn("Planner failed at step {}: {}", stepNumber, exception.getMessage());
+                log.warn("Planner failed at step {}: {}", stepNumber, SafeDiagnostic.message(exception, 500));
                 return state.finish(AgentExecutionStatus.FAILED,
                         "Planner error: " + safeMessage(exception));
             }
@@ -164,15 +164,11 @@ public class ControlledAgentExecutor {
         try {
             listener.onStep(step);
         } catch (RuntimeException exception) {
-            log.warn("Execution listener failed for step {}: {}", step.stepNumber(), exception.toString());
+            log.warn("Execution listener failed for step {}: {}", step.stepNumber(), SafeDiagnostic.message(exception, 500));
         }
     }
 
     private static String safeMessage(RuntimeException exception) {
-        String message = exception.getMessage();
-        if (message == null || message.isBlank()) {
-            return exception.getClass().getSimpleName();
-        }
-        return message.length() > 500 ? message.substring(0, 500) + "..." : message;
+        return SafeDiagnostic.message(exception, 500);
     }
 }
