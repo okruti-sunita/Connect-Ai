@@ -108,13 +108,21 @@ class McpConnectionServiceTest {
                 McpConnectionStatus.FAILED,
                 server.getStatus());
 
-        assertTrue(
-                server.getLastError()
-                        .contains("server rejected initialize"));
+        assertTrue(server.getLastError().contains("unexpected error"));
 
         assertFalse(registry.isConnected(serverId));
 
         verify(client).closeGracefully();
+    }
+
+    @Test
+    void unexpectedRemoteErrorsAreRedactedBeforeReturningToTheUi() {
+        String detail = McpConnectionService.describeFailure(new RuntimeException(
+                "Authorization: Basic dXNlcjpwYXNz refresh_token=refresh-secret"));
+
+        assertTrue(detail.contains("unexpected error"));
+        assertFalse(detail.contains("dXNlcjpwYXNz"));
+        assertFalse(detail.contains("refresh-secret"));
     }
 
     @Test
@@ -230,6 +238,26 @@ class McpConnectionServiceTest {
                 response.status());
 
         assertTrue(response.initialized());
+        assertTrue(registry.isConnected(serverId));
+    }
+
+    @Test
+    void staleRuntimeSessionDoesNotOverrideDisconnectedOAuthLifecycle() {
+        McpServerRepository repository = mock(McpServerRepository.class);
+        McpClientFactory factory = mock(McpClientFactory.class);
+        McpClientRegistry registry = new McpClientRegistry();
+        EMcpServer server = new EMcpServer("oauth", McpTransportType.STREAMABLE_HTTP,
+                "http://localhost:8080/mcp", McpAuthType.OAUTH, null, true);
+        server.markDisconnected();
+        UUID serverId = UUID.randomUUID();
+        when(repository.findById(serverId)).thenReturn(Optional.of(server));
+        registry.register(serverId, mock(McpSyncClient.class));
+
+        McpConnectionService service = new McpConnectionService(repository, factory, registry);
+        var response = service.status(serverId);
+
+        assertEquals(McpConnectionStatus.DISCONNECTED, response.status());
+        assertFalse(response.initialized());
         assertTrue(registry.isConnected(serverId));
     }
 

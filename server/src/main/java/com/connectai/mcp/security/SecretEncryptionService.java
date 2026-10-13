@@ -22,7 +22,12 @@ public class SecretEncryptionService {
     private final SecureRandom secureRandom = new SecureRandom();
 
     public SecretEncryptionService(
-            @Value("${connectai.security.encryption-key:local-dev-only-change-me}") String encryptionKey) {
+            @Value("${connectai.security.encryption-key:}") String encryptionKey) {
+        if (encryptionKey == null || encryptionKey.length() < 32
+                || encryptionKey.contains("<") || encryptionKey.contains(">")) {
+            throw new IllegalStateException(
+                    "CONNECTAI_ENCRYPTION_KEY must be configured with at least 32 characters before the application can store credentials.");
+        }
         this.key = new SecretKeySpec(sha256(encryptionKey), "AES");
     }
 

@@ -1,17 +1,32 @@
+
 # Local development configuration
 
 connectai:
   tools:
     mode: mcp
+
   mcp:
-    # Re-establish the connections that were live before a restart (real handshake, errors shown).
+    # Re-establish previously live connections after restart.
     reconnect-on-startup: ${CONNECTAI_MCP_RECONNECT_ON_STARTUP:true}
+
   llm:
     enabled: ${CONNECTAI_LLM_ENABLED:true}
-    provider: ${CONNECTAI_LLM_PROVIDER:ollama}
+    provider: ${CONNECTAI_LLM_PROVIDER:groq}
+
+    # Groq Cloud API
+    groq-api-key: ${GROQ_API_KEY:}
+    groq-base-url: ${GROQ_BASE_URL:https://api.groq.com/openai/v1}
+    groq-model: ${GROQ_MODEL:openai/gpt-oss-120b}
+
+    # Keep Ollama available as an optional alternative.
     ollama-base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
     ollama-model: ${OLLAMA_MODEL:qwen3:1.7b}
+    ollama-num-ctx: ${OLLAMA_NUM_CTX:2048}
+
+    # LLM request settings
+    max-tokens: ${CONNECTAI_LLM_MAX_TOKENS:1024}
     timeout-seconds: ${CONNECTAI_LLM_TIMEOUT_SECONDS:180}
+    temperature: 0
 
 logging:
   level:

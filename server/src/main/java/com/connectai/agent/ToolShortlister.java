@@ -95,7 +95,7 @@ public final class ToolShortlister {
          * so an answer can at most partially cover the question.
          */
         public List<String> uncoveredCapabilities() {
-            return uncovered.stream().filter(CAPABILITY_WORDS::contains).toList();
+            return uncovered.stream().filter(ToolShortlister::isCapabilityWord).toList();
         }
     }
 
@@ -204,7 +204,7 @@ public final class ToolShortlister {
                 }
                 variants.add(topic);
                 for (String variant : variants) {
-                    if (toolTokens.contains(variant) || containsPrefix(toolTokens, variant)) {
+                    if (matchesWord(toolTokens, variant)) {
                         covered.add(topic);
                         coversAny = true;
                         break;
@@ -243,7 +243,7 @@ public final class ToolShortlister {
             }
             Set<String> nameTokens = tokens(tool.toolName() + " " + tool.title());
             boolean named = nameTokens.stream().anyMatch(token -> token.length() >= 4
-                    && (questionTokens.contains(token) || containsPrefix(questionTokens, token)));
+                    && matchesWord(questionTokens, token));
             if (named) {
                 eligible.add(tool);
             }
@@ -327,6 +327,29 @@ public final class ToolShortlister {
             }
         }
         return false;
+    }
+
+    private static boolean matchesWord(Set<String> words, String token) {
+        if (words.contains(token) || containsPrefix(words, token)) {
+            return true;
+        }
+        String normalized = singularForm(token);
+        return words.stream().anyMatch(word -> singularForm(word).equals(normalized));
+    }
+
+    /** Handles common English plurals where a prefix check is insufficient (repository/repositories). */
+    private static String singularForm(String word) {
+        if (word.endsWith("ies") && word.length() > 4) {
+            return word.substring(0, word.length() - 3) + "y";
+        }
+        if ((word.endsWith("ches") || word.endsWith("shes") || word.endsWith("xes")
+                || word.endsWith("zes") || word.endsWith("sses")) && word.length() > 4) {
+            return word.substring(0, word.length() - 2);
+        }
+        if (word.endsWith("s") && !word.endsWith("ss") && !word.endsWith("us") && word.length() > 3) {
+            return word.substring(0, word.length() - 1);
+        }
+        return word;
     }
 
     private static int requiredCount(McpToolCandidate tool) {

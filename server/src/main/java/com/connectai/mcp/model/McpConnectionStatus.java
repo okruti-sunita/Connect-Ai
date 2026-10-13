@@ -4,6 +4,7 @@ public enum McpConnectionStatus {
     REGISTERED,
     CONNECTING,
     CONNECTED,
+    REAUTH_REQUIRED,
     FAILED,
     DISCONNECTED
 }

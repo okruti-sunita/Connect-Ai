@@ -700,7 +700,7 @@ class McpToolExecutionIntegrationTest {
         secretEncryptionService() {
 
             return new SecretEncryptionService(
-                    "integration-test-key"
+                    "integration-test-encryption-key-long-enough-123456"
             );
         }
 

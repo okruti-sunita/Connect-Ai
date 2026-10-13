@@ -2,8 +2,8 @@
 # Spring Boot loads ./config/application.yml from the backend's working directory automatically.
 connectai:
   security:
-    # Encrypts stored MCP tokens. Changing it later makes stored tokens unreadable.
-    encryption-key: "<generate-a-long-random-string>"
+    # Required; use a high-entropy value of at least 32 characters. Changing it later makes stored tokens unreadable.
+    encryption-key: "<generate-a-high-entropy-random-string-at-least-32-characters>"
   oauth:
     providers:
       github:
@@ -11,3 +11,7 @@ connectai:
         # Authorization callback URL: http://localhost:8080/connect-ai/api/oauth/callback
         client-id: "<your-oauth-app-client-id>"
         client-secret: "<your-oauth-app-client-secret>"
+      google:
+        # Google Drive MCP uses the read-only scope configured in application.yml.
+        client-id: ${GOOGLE_OAUTH_CLIENT_ID:}
+        client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:}

@@ -145,6 +145,10 @@ $bad: #b91c1c;
       background: #f59e0b;
     }
 
+    &.REAUTH_REQUIRED {
+      background: #f97316;
+    }
+
     &.REGISTERED {
       background: #818cf8;
     }

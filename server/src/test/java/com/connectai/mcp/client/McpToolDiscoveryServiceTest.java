@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -139,6 +140,23 @@ class McpToolDiscoveryServiceTest {
                 assertThrows(ResponseStatusException.class, () -> service.discover(serverId));
 
         assertEquals(502, exception.getStatusCode().value());
+    }
+
+    @Test
+    void stopsPaginationWhenServerReturnsAnUnboundedSequenceOfUniqueCursors() {
+        UUID serverId = UUID.randomUUID();
+        when(repository.findById(serverId)).thenReturn(Optional.of(server(serverId)));
+        when(client.listTools()).thenReturn(new McpSchema.ListToolsResult(List.of(), "cursor-0", Map.of()));
+        AtomicInteger cursor = new AtomicInteger();
+        when(client.listTools(anyString())).thenAnswer(invocation ->
+                new McpSchema.ListToolsResult(List.of(), "cursor-" + cursor.incrementAndGet(), Map.of()));
+        registry.register(serverId, client);
+
+        ResponseStatusException exception = assertThrows(ResponseStatusException.class,
+                () -> service.discover(serverId));
+
+        assertEquals(502, exception.getStatusCode().value());
+        verify(client, times(100)).listTools(anyString());
     }
 
     private EMcpServer server(UUID ignoredId) {

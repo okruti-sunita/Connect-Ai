@@ -26,10 +26,18 @@ public record RegisterMcpServerRequest(
         Boolean enabled,
 
         /** For authType OAUTH: the provider to sign in with (a connectai.oauth.providers key, e.g. "github"). */
-        String oauthProvider
+        String oauthProvider,
+
+        @Size(max = 100, message = "catalogKey must not exceed 100 characters")
+        String catalogKey
 ) {
     public RegisterMcpServerRequest(String name, McpTransportType transport, String endpoint, McpAuthType authType,
                                     String secret, Boolean enabled) {
-        this(name, transport, endpoint, authType, secret, enabled, null);
+        this(name, transport, endpoint, authType, secret, enabled, null, null);
+    }
+
+    public RegisterMcpServerRequest(String name, McpTransportType transport, String endpoint, McpAuthType authType,
+                                    String secret, Boolean enabled, String oauthProvider) {
+        this(name, transport, endpoint, authType, secret, enabled, oauthProvider, null);
     }
 }

@@ -5,7 +5,7 @@ import './style/tools.scss';
 import ConnectToolModal from './connect-tool-modal';
 import ToolDetailView from './tool-detail-view';
 import ToolLogo from './tool-logo';
-import {CATALOG, CATEGORY_FILTERS, CUSTOM_ITEM} from './tool-catalog';
+import {CATEGORY_FILTERS, mapCatalogEntry} from './tool-catalog';
 import type {CatalogItem, ToolCategory} from './tool-catalog';
 import {toolsApi} from './tools-api';
 import {openSignInPopup, signInWithPopup} from './oauth';
@@ -14,6 +14,7 @@ import {findCatalogItem, relativeTime, STATUS_LABEL} from './tools-utils';
 
 const ToolsView = () => {
     const [tools, setTools] = useState<McpServerDto[]>([]);
+    const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [loadError, setLoadError] = useState<string | null>(null);
     const [capCounts, setCapCounts] = useState<Record<string, number>>({});
@@ -25,8 +26,10 @@ const ToolsView = () => {
 
     const refresh = useCallback(async () => {
         try {
-            const list = await toolsApi.list();
+            const [list, catalogResponse] = await Promise.all([toolsApi.list(), toolsApi.catalog()]);
             setTools(list);
+            const catalog = catalogResponse.map(mapCatalogEntry);
+            setCatalogItems(catalog);
             setLoadError(null);
             const connected = list.filter((t) => t.runtimeConnected);
             const results = await Promise.allSettled(connected.map((t) => toolsApi.capabilities(t.id)));
@@ -70,7 +73,8 @@ const ToolsView = () => {
         })();
     };
 
-    const needsSignIn = (tool: McpServerDto) => tool.authType === 'OAUTH' && !tool.secretConfigured;
+    const needsSignIn = (tool: McpServerDto) => tool.authType === 'OAUTH'
+        && (!tool.secretConfigured || tool.status === 'REAUTH_REQUIRED');
 
     const runAction = async (tool: McpServerDto, action: 'connect' | 'disconnect') => {
         setBusyId(tool.id);
@@ -120,7 +124,7 @@ const ToolsView = () => {
         });
     };
 
-    const openWizard = (preset: CatalogItem | null) => setModal((m) => ({open: true, preset, session: m.session + 1}));
+    const openWizard = (preset: CatalogItem) => setModal((m) => ({open: true, preset, session: m.session + 1}));
 
     const selected = selectedId ? tools.find((t) => t.id === selectedId) : undefined;
     if (selected) {
@@ -129,19 +133,24 @@ const ToolsView = () => {
                 {confirmHolder}
                 <ToolDetailView
                 tool={selected}
+                catalogItem={catalogItems.find((item) => item.key === selected.catalogKey)}
                 busy={busyId === selected.id}
                 onBack={() => setSelectedId(null)}
                 onConnect={() => void runAction(selected, 'connect')}
                 onDisconnect={() => void runAction(selected, 'disconnect')}
                 onRemove={() => removeTool(selected)}
+                onChanged={() => void refresh()}
                 onSignIn={selected.authType === 'OAUTH' ? () => signIn(selected) : undefined}
                 />
             </>
         );
     }
 
-    const catalog = CATALOG.filter((c) => filter === 'All' || c.category === filter);
+    const catalog = catalogItems
+        .filter((c) => filter === 'All' || c.category === filter)
+        .sort((a, b) => Number(b.status === 'CONNECTED') - Number(a.status === 'CONNECTED'));
     const showCustom = filter === 'All' || filter === 'Custom';
+    const customItem = catalogItems.find((item) => item.key === 'custom');
 
     return (
         <div className="tools-page">
@@ -150,7 +159,7 @@ const ToolsView = () => {
                     <h1>Tools</h1>
                     <p className="page-sub">Connect MCP servers to give Connect AI access to your engineering context.</p>
                 </div>
-                <button type="button" className="add-tool-btn" onClick={() => openWizard(null)}>
+                <button type="button" className="add-tool-btn" disabled={!customItem} onClick={() => customItem && openWizard(customItem)}>
                     <Plus size={17}/>Add a Tool
                 </button>
             </div>
@@ -166,8 +175,8 @@ const ToolsView = () => {
             ) : (
                 <div className="conn-grid">
                     {tools.map((tool) => {
-                        const item = findCatalogItem(tool.name);
-                        const connected = tool.runtimeConnected;
+                        const item = findCatalogItem(tool.name, catalogItems);
+                        const connected = tool.runtimeConnected && tool.status === 'CONNECTED';
                         return (
                             <article key={tool.id} className="conn-card">
                                 <div className="conn-top">
@@ -201,6 +210,7 @@ const ToolsView = () => {
                                 <div className="conn-bottom">
                                     {connected && capCounts[tool.id] !== undefined && <span className="pill">{capCounts[tool.id]} capabilities</span>}
                                     {tool.status === 'FAILED' && <span className="pill bad">Connection failed</span>}
+                                    {tool.status === 'REAUTH_REQUIRED' && <span className="pill bad">Re-authorize to continue</span>}
                                     {!connected && tool.lastError && <span className="conn-error" title={tool.lastError}>{tool.lastError}</span>}
                                     {!connected && (
                                         <Button type="primary" size="small" loading={busyId === tool.id}
@@ -223,37 +233,41 @@ const ToolsView = () => {
             </div>
             <div className="catalog-grid">
                 {catalog.map((item) => {
-                    const added = tools.some((t) => findCatalogItem(t.name)?.id === item.id);
+                    const added = item.connectionCount > 0 || tools.some((t) => t.catalogKey === item.key);
+                    const method = item.methods.find((candidate) => candidate.supported);
                     return (
                         <article key={item.id} className="catalog-card">
                             <div className="catalog-top"><ToolLogo name={item.name} item={item} size={36}/><h3>{item.name}</h3></div>
-                            <p>{item.blurb}</p>
+                            <p>{item.description}</p>
                             <div className="catalog-foot">
                                 <span className="pill">{item.category}</span>
-                                <button type="button" className="link-btn" onClick={() => openWizard(item)}>{added ? 'Add another' : 'Connect'}</button>
+                                <span className="pill">{method?.label ?? 'Setup required'}</span>
+                                <span className="pill">{item.status.replaceAll('_', ' ').toLowerCase()}</span>
+                                <button type="button" className="link-btn" disabled={!method}
+                                        onClick={() => openWizard(item)}>{added ? 'Add another connection' : 'Connect'}</button>
                             </div>
                         </article>
                     );
                 })}
                 {showCustom && (
-                    <button type="button" className="catalog-card custom" onClick={() => openWizard(null)}>
+                    <button type="button" className="catalog-card custom" disabled={!customItem} onClick={() => customItem && openWizard(customItem)}>
                         <Plus size={26}/>
                         <strong>Add Custom MCP Server</strong>
-                        <span>{CUSTOM_ITEM.blurb}</span>
+                        <span>{customItem?.description ?? 'Custom MCP server setup is unavailable.'}</span>
                     </button>
                 )}
                 {catalog.length === 0 && !showCustom && <p className="empty-note">No tools in this category yet.</p>}
             </div>
 
             {confirmHolder}
-            <ConnectToolModal
+            {modal.preset && <ConnectToolModal
                 open={modal.open}
                 preset={modal.preset}
                 session={modal.session}
                 existingNames={tools.map((t) => t.name)}
                 onClose={() => setModal((m) => ({...m, open: false}))}
                 onChanged={() => void refresh()}
-            />
+            />}
         </div>
     );
 };

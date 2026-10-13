@@ -43,7 +43,7 @@ Then open http://localhost:5173 → **Connections** → add the GitHub MCP serve
 | Variable | Default | Purpose |
 |---|---|---|
 | `DB_URL` / `DB_USERNAME` / `DB_PASSWORD` | `jdbc:postgresql://localhost:5432/connect`, `connect`, `connect` | PostgreSQL |
-| `CONNECTAI_ENCRYPTION_KEY` | `local-dev-only-change-me` | Encrypts stored MCP tokens. **Set your own.** Changing it makes stored tokens unreadable. |
+| `CONNECTAI_ENCRYPTION_KEY` | required | At least 32 characters; encrypts stored MCP tokens. Use a high-entropy value and back it up securely. Changing it makes stored tokens unreadable. |
 | `CONNECTAI_LLM_ENABLED` | `true` in profile `local` | `false` = rule-based planner + template answers, no model calls |
 | `CONNECTAI_LLM_PROVIDER` | `ollama` in profile `local` | `ollama` or `anthropic` |
 | `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | `http://localhost:11434` / `qwen3:1.7b` | Local model |
@@ -51,6 +51,10 @@ Then open http://localhost:5173 → **Connections** → add the GitHub MCP serve
 | `CONNECTAI_LLM_TIMEOUT_SECONDS` | `180` (local) | Per model call |
 | `ANTHROPIC_API_KEY` | – | Only with provider `anthropic` |
 | `CONNECTAI_MCP_REQUEST_TIMEOUT_SECONDS` / `..._CONNECT_TIMEOUT_SECONDS` | `20` / `10` | MCP calls |
+| `CONNECTAI_MCP_ALLOW_PRIVATE_HOSTS` | `false` | Allows explicitly configured private/local MCP destinations; keep disabled unless required. |
+| `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | unset | Required to enable Google Drive sign-in. |
+| `CONNECTAI_OAUTH_REDIRECT_URI` | `http://localhost:8080/connect-ai/api/oauth/callback` | Exact OAuth callback registered with the provider. |
+| `CONNECTAI_FRONTEND_ORIGIN` | `http://localhost:5173` | Exact frontend origin allowed to receive the OAuth popup message. |
 | `CONNECTAI_CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | Only needed without the Vite proxy |
 | `VITE_API_BASE_URL` (client) | `/connect-ai/api` | API base; the default goes through the Vite proxy |
 | `VITE_BACKEND_URL` (client) | `http://localhost:8080` | Proxy target |
@@ -87,8 +91,55 @@ One-time setup by whoever runs the backend:
 Then: Connections → GitHub → *Sign in with GitHub* → approve in the popup → the connection is tested and
 saved. **Re-authorize** on the connection's page replaces the token (e.g. after revoking it on GitHub).
 Scopes default to `repo read:org read:user` (`GITHUB_OAUTH_SCOPES`); investigations still only use
-read-only tools. Other OAuth providers are added under `connectai.oauth.providers.<id>` and referenced
-by a catalog entry's `oauthProvider`.
+read-only tools. The shared provider configuration supports `authorize-url`, `token-url`, `client-id`,
+`client-secret`, `scopes`, optional `access-type`, `revocation-url`, `pkce`, `client-authentication` (`client_secret_post`
+or `client_secret_basic`), `authorization-parameters`, and `token-parameters`. Provider endpoints must
+use HTTPS; HTTP is accepted only for loopback test providers. Reserved OAuth protocol fields cannot be
+overridden by extra parameters. Provider credentials must be pre-registered; dynamic client registration
+is not implemented. Add a provider under `connectai.oauth.providers.<id>` and reference its ID from a
+catalog entry's `oauthProvider`. Verify each provider's scopes and token behavior against its official docs.
+
+#### Connect Google Drive MCP
+
+Google Drive is available in the Tools catalog using the official endpoint
+`https://drivemcp.googleapis.com/mcp/v1`. Google currently requires the Google Drive API and Drive MCP API,
+Google Workspace Developer Preview Program membership, an OAuth consent screen, and a Web application
+OAuth client. Follow Google's current [Drive MCP setup instructions](https://developers.google.com/workspace/drive/api/guides/configure-mcp-server)
+for the project-side Data Access scopes; Connect AI's authorization request remains limited to the
+read-only `https://www.googleapis.com/auth/drive.readonly` scope.
+Add the backend redirect URI as an authorized redirect URI; locally it defaults to
+`http://localhost:8080/connect-ai/api/oauth/callback` and can be changed with
+`CONNECTAI_OAUTH_REDIRECT_URI`. The URI must be reachable by Google and match exactly.
+
+Set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in the backend environment, then
+restart the backend. Connect AI requests offline access and PKCE, stores tokens encrypted, and
+refreshes access tokens as MCP requests are made. In **Tools → Google Drive**, select **Sign in with
+Google** and approve the read-only scope. Google currently lists the Drive MCP service as a Developer
+Preview. The project-side OAuth consent-screen scopes documented by Google are separate from the scope
+Connect AI requests during sign-in; Connect AI requests only `drive.readonly`.
+`drive.readonly` can expose all Drive files readable by the signed-in account and is classified as a
+restricted Google scope, so consent-screen testing or verification requirements may apply. Google’s
+current tool reference lists `search_files` and `read_file_content` as read-only tools that accept this
+scope. To verify manually, choose a specifically named non-sensitive test document and ask Connect AI to
+find and summarize that file; inspect that the steps used `search_files` and then `read_file_content` and
+that evidence references the selected file. Do not ask the test to create, copy, or edit a file.
+
+Also set `CONNECTAI_ENCRYPTION_KEY` before starting the backend. OAuth success means Google issued a
+token; it does not mean the Drive MCP endpoint initialized. The connection wizard separately reports
+MCP handshake and tool discovery results. Disconnect closes the MCP session but preserves authorization
+for reconnect; removing the saved connection attempts provider revocation when its provider config has a
+`revocation-url`, then deletes its locally encrypted token. The Google provider is configured with Google's
+revocation endpoint; GitHub revocation is not configured. Google documents that revocation may invalidate
+issued access and refresh tokens for the OAuth project, so other connections using the same project may
+also need authorization again.
+
+GitHub and Google Drive have provider implementations; each is available only when its backend OAuth
+client credentials are configured. Other catalog entries are not OAuth-ready unless their provider is
+explicitly configured and tested. Dynamic OAuth client registration and application user accounts are
+not implemented; the callback is browser-bound and tied to the initiating saved connection.
+Authorization attempts are held in short-lived process memory, so restarting the server or routing the
+callback to another backend instance requires starting sign-in again. Expired/revoked credentials are
+shown as **Sign-in expired** and require reauthorization before reconnecting.
 
 "Connected" is only shown after a completed MCP `initialize` handshake. Live sessions do not survive a
 backend restart: after a restart every server shows **Disconnected** with an explanation; click **Reconnect**.
@@ -188,6 +239,28 @@ connection being used.
 
 Request samples: `server/http/*.http`.
 
+### Catalog-based connection setup
+
+The backend connector definitions live in `server/src/main/resources/catalog/mcp-catalog.json` and are
+validated when Spring starts. `GET /connect-ai/api/catalog` returns those definitions plus derived connection
+counts and status; unsupported authentication choices are marked `supported: false`. The Tools page reads
+this API rather than maintaining a second vendor list.
+
+For token or unauthenticated connections the wizard first calls `POST /connect-ai/api/connections/test`.
+That endpoint performs a temporary Streamable HTTP MCP initialize and paginated tool discovery without
+persisting a connection. On success, `POST /connect-ai/api/connections` encrypts credentials server-side,
+connects, discovers tools, and saves the connection. The legacy `/api/tools` registration and OAuth routes
+remain for compatibility. OAuth discovery and dynamic client registration are not implemented; OAuth
+catalog entries use only a configured static provider from `connectai.oauth.providers`.
+
+Authentication configuration is encrypted in the database. `CONNECTAI_ENCRYPTION_KEY` must remain stable
+to decrypt stored connection credentials. Remote MCP endpoints must use HTTPS. The backend rejects DNS
+results resolving to loopback, link-local, private, or reserved addresses unless
+`CONNECTAI_MCP_ALLOW_PRIVATE_HOSTS=true` is explicitly set for an environment that requires private MCP
+servers. This DNS check occurs before connection establishment and cannot fully prevent a hostile DNS
+rebinding between validation and the HTTP client resolving the host; deploy behind suitable egress controls.
+See [CONNECTORS.md](CONNECTORS.md) for supported auth methods, connector limitations, and extension notes.
+
 ## Tests
 
 ```bash
@@ -206,8 +279,11 @@ cd client && npm run build               # TypeScript check + production build
 
 - Only the Streamable HTTP transport is implemented (no stdio/SSE).
 - Live MCP sessions are in memory: reconnect after each backend restart (no automatic reconnect).
-- No user authentication; anyone who can reach the backend can register MCP endpoints
-  (the backend will make HTTP requests to any URL entered). Run it locally only.
+- No user authentication; anyone who can reach the backend can register MCP endpoints.
+  The backend requires HTTPS for remote endpoints and blocks loopback, private, link-local,
+  and reserved destinations unless `CONNECTAI_MCP_ALLOW_PRIVATE_HOSTS=true` is explicitly set.
+  DNS is validated before connection, but deployment egress controls are still needed to address
+  DNS rebinding. Run the service only in a trusted environment.
 - Evidence and questions are sent to the configured model provider.
 
 ## Layout (server)

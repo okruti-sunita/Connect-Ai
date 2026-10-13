@@ -4,6 +4,7 @@ import com.connectai.jpa.base.AbstractUUIDPersistable;
 import com.connectai.mcp.model.McpAuthType;
 import com.connectai.mcp.model.McpConnectionStatus;
 import com.connectai.mcp.model.McpTransportType;
+import com.connectai.mcp.catalog.ConnectMethod;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -29,6 +30,9 @@ public class EMcpServer extends AbstractUUIDPersistable {
     @Column(nullable = false, length = 30)
     private McpTransportType transport;
 
+    @Column(name = "catalog_key", length = 100)
+    private String catalogKey;
+
     @Column(nullable = false, length = 500)
     private String endpoint;
 
@@ -38,6 +42,13 @@ public class EMcpServer extends AbstractUUIDPersistable {
 
     @Column(name = "encrypted_secret", length = 2000)
     private String encryptedSecret;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "connect_method", length = 30)
+    private ConnectMethod connectMethod;
+
+    @Column(name = "encrypted_auth_config", length = 12000)
+    private String encryptedAuthConfig;
 
     @Column(nullable = false)
     private boolean enabled;
@@ -90,6 +101,29 @@ public class EMcpServer extends AbstractUUIDPersistable {
         this.oauthProvider = providerId;
     }
 
+    public void setCatalogKey(String catalogKey) {
+        this.catalogKey = catalogKey;
+    }
+
+    public void setConnectionAuth(ConnectMethod method, String encryptedConfig) {
+        this.connectMethod = method;
+        this.encryptedAuthConfig = encryptedConfig;
+        this.authType = switch (method) {
+            case OAUTH_APP, OAUTH_DISCOVERY -> McpAuthType.OAUTH;
+            case NONE -> McpAuthType.NONE;
+            default -> McpAuthType.BEARER;
+        };
+    }
+
+    /** Replaces a manually supplied bearer credential after service-side encryption. */
+    public void replaceBearerCredential(String encryptedCredential) {
+        this.encryptedSecret = encryptedCredential;
+        this.encryptedAuthConfig = null;
+        this.connectMethod = ConnectMethod.TOKEN_BEARER;
+        this.lastError = null;
+        this.status = McpConnectionStatus.DISCONNECTED;
+    }
+
     /** Stores a freshly issued OAuth token (already encrypted). The old one is replaced. */
     public void storeOAuthToken(String encryptedAccessToken, String encryptedRefreshToken, OffsetDateTime expiresAt) {
         this.encryptedSecret = encryptedAccessToken;
@@ -98,9 +132,17 @@ public class EMcpServer extends AbstractUUIDPersistable {
         }
         this.tokenExpiresAt = expiresAt;
         this.lastError = null;
+        if (this.status == McpConnectionStatus.REAUTH_REQUIRED) {
+            this.status = McpConnectionStatus.DISCONNECTED;
+        }
     }
 
     public void recordAuthorizationFailure(String reason) {
+        this.lastError = reason;
+    }
+
+    public void markReauthorizationRequired(String reason) {
+        this.status = McpConnectionStatus.REAUTH_REQUIRED;
         this.lastError = reason;
     }
 

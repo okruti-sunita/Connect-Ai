@@ -3,18 +3,23 @@ import {Button, Form, Input, Modal, Segmented, Select, message} from 'antd';
 import {Check, ShieldCheck} from 'lucide-react';
 import './style/connect-tool-modal.scss';
 import ToolLogo from './tool-logo';
-import {CUSTOM_ITEM, type CatalogItem} from './tool-catalog';
-import {toolsApi, ToolsApiError, type Capability, type RegisterToolPayload} from './tools-api';
+import type {CatalogItem, ConnectMethod} from './tool-catalog';
+import {toolsApi, ToolsApiError, type Capability, type CreateConnectionPayload, type OAuthProviderDto, type RegisterToolPayload} from './tools-api';
 import {openSignInPopup, signInWithPopup} from './oauth';
 
 interface FormValues {
     connectionName: string;
     deployment?: string;
     endpoint: string;
-    authType: 'NONE' | 'BEARER';
+    connectionMethod: ConnectMethod;
     /** For tools that support OAuth: sign in with the provider, or paste a token. */
     authMethod?: 'oauth' | 'token';
+    username?: string;
     token?: string;
+    headerName?: string;
+    headerValue?: string;
+    headerName2?: string;
+    headerValue2?: string;
 }
 
 interface TestState {
@@ -25,7 +30,7 @@ interface TestState {
     capabilitiesFailed: boolean;
 }
 
-const TOKEN_STAGES = ['Registering the connection', 'Connecting to the server', 'Discovering capabilities'];
+const TOKEN_STAGES = ['Testing the endpoint', 'Initializing MCP', 'Discovering tools', 'Saving the connection'];
 const oauthStages = (provider: string) =>
     ['Registering the connection', `Signing in with ${provider}`, 'Connecting to the server', 'Discovering capabilities'];
 
@@ -67,10 +72,12 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
     }, []);
 
     const isCustom = item.id === 'custom';
-    const watchedAuth = Form.useWatch('authType', form);
+    const externalMcpRequired = item.connectorMode === 'external-mcp-required';
     const watchedMethod = Form.useWatch('authMethod', form);
+    const watchedConnectionMethod = Form.useWatch('connectionMethod', form);
     // null while loading; true/false once the server said whether the provider is configured.
     const [oauthReady, setOauthReady] = useState<boolean | null>(item.oauthProvider ? null : false);
+    const [oauthProvider, setOauthProvider] = useState<OAuthProviderDto | null>(null);
     useEffect(() => {
         if (!item.oauthProvider) return;
         let alive = true;
@@ -78,8 +85,9 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
             .then((providers) => {
                 if (!alive) return;
                 const ready = providers.some((p) => p.id === item.oauthProvider && p.configured);
+                setOauthProvider(providers.find((p) => p.id === item.oauthProvider) ?? null);
                 setOauthReady(ready);
-                if (!ready) form.setFieldValue('authMethod', 'token');
+                if (!ready) form.setFieldValue('authMethod', item.methods.some((method) => method.id === 'TOKEN_BEARER' && method.supported) ? 'token' : 'oauth');
             })
             .catch(() => {
                 if (alive) setOauthReady(false);
@@ -88,12 +96,16 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
             alive = false;
         };
     }, [item.oauthProvider, form]);
-    const useOAuth = !isCustom && !!item.oauthProvider && oauthReady === true && (watchedMethod ?? 'oauth') === 'oauth';
-    const authType: RegisterToolPayload['authType'] = isCustom ? (watchedAuth ?? 'NONE')
-        : item.localServerHelp ? 'NONE' : useOAuth ? 'OAUTH' : 'BEARER';
+    const defaultMethod = item.methods.find((method) => method.supported)?.id ?? 'NONE';
+    const connectMethod: ConnectMethod = isCustom || externalMcpRequired || !item.oauthProvider
+        ? watchedConnectionMethod ?? defaultMethod
+        : (watchedMethod ?? 'oauth') === 'oauth' ? 'OAUTH_APP' : 'TOKEN_BEARER';
+    const authType: RegisterToolPayload['authType'] = connectMethod === 'OAUTH_APP' || connectMethod === 'OAUTH_DISCOVERY'
+        ? 'OAUTH' : connectMethod === 'NONE' ? 'NONE' : 'BEARER';
     const stages = authType === 'OAUTH' ? oauthStages(item.name) : TOKEN_STAGES;
     const endpoint = Form.useWatch('endpoint', form);
     const usingManagedAddress = !isCustom && !!item.endpoint && endpoint === item.endpoint;
+    const oauthAlternative = item.methods.some((method) => method.id === 'TOKEN_BEARER' && method.supported);
 
     const runTest = async (popup: Window | null) => {
         const v = form.getFieldsValue(true) as FormValues;
@@ -105,6 +117,7 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
             secret: authType === 'BEARER' ? (v.token ?? '') : null,
             enabled: true,
             oauthProvider: authType === 'OAUTH' ? item.oauthProvider : null,
+            catalogKey: item.key,
         };
         const fingerprint = JSON.stringify([payload.name, payload.endpoint, payload.authType, payload.secret]);
         const set = (s: TestState) => {
@@ -114,35 +127,59 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
         setStep(2);
         set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
         try {
-            if (!registered.current || registered.current.fingerprint !== fingerprint) {
-                const created = await toolsApi.register(payload);
-                registered.current = {id: created.id, fingerprint};
-                onChangedRef.current(); // the new tool exists on the server now, so show it in the list
-            }
-            const id = registered.current.id;
-            stage = 1;
-            set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
             if (authType === 'OAUTH') {
+                if (!registered.current || registered.current.fingerprint !== fingerprint) {
+                    const created = await toolsApi.register(payload);
+                    registered.current = {id: created.id, fingerprint};
+                }
+                const id = registered.current.id;
+                stage = 1;
+                set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
                 // The backend exchanges the code and stores the token; this only waits for the outcome.
                 const signIn = await signInWithPopup(id, popup);
                 if (!signIn.ok) throw new ToolsApiError(signIn.message, 401);
                 stage = 2;
                 set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
+                const connection = await toolsApi.connect(id);
+                if (!connection?.initialized) {
+                    throw new ToolsApiError(connection?.error ?? 'The MCP server did not complete the handshake.', 502);
+                }
+                stage = 3;
+                set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
+                const capabilities = await toolsApi.capabilities(id);
+                set({phase: 'success', stage: stages.length, capabilities, capabilitiesFailed: false});
+            } else {
+                const credentials: Record<string, string> = {};
+                if (connectMethod === 'TOKEN_BEARER') credentials.token = v.token ?? '';
+                if (connectMethod === 'TOKEN_BASIC') {
+                    credentials.username = v.username ?? '';
+                    credentials.token = v.token ?? '';
+                }
+                if (connectMethod === 'TOKEN_HEADER') {
+                    credentials.headerName = v.headerName ?? '';
+                    credentials.token = v.headerValue ?? '';
+                }
+                if (connectMethod === 'TOKEN_HEADERS') {
+                    if (v.headerName) credentials[`header:${v.headerName}`] = v.headerValue ?? '';
+                    if (v.headerName2) credentials[`header:${v.headerName2}`] = v.headerValue2 ?? '';
+                }
+                const connectionPayload: CreateConnectionPayload = {
+                    catalogKey: item.key,
+                    name: payload.name,
+                    endpoint: payload.endpoint,
+                    method: connectMethod,
+                    credentials,
+                };
+                const tested = await toolsApi.testConnection(connectionPayload);
+                if (!tested.success) {
+                    throw new ToolsApiError(tested.hint ? `${tested.message ?? 'Connection test failed.'} ${tested.hint}` : tested.message ?? 'Connection test failed.', 502);
+                }
+                stage = 3;
+                set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
+                const created = await toolsApi.createConnection(connectionPayload);
+                const capabilities = created.toolNames.map((name) => ({name, description: ''}));
+                set({phase: 'success', stage: stages.length, capabilities, capabilitiesFailed: false});
             }
-            const connection = await toolsApi.connect(id);
-            if (!connection?.initialized) {
-                throw new ToolsApiError(connection?.error ?? 'The MCP server did not complete the handshake.', 502);
-            }
-            stage += 1;
-            set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
-            let capabilities: Capability[] = [];
-            let capabilitiesFailed = false;
-            try {
-                capabilities = await toolsApi.capabilities(id);
-            } catch {
-                capabilitiesFailed = true;
-            }
-            set({phase: 'success', stage: stages.length, capabilities, capabilitiesFailed});
             onChangedRef.current();
         } catch (error) {
             console.error('Connection test failed at stage', stage, error instanceof Error ? error.name : error);
@@ -172,8 +209,21 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
         onClose();
     };
 
-    const initialEndpoint = item.deployments?.[0]?.endpoint ?? item.endpoint;
+    const initialEndpoint = item.deployments?.[0]?.endpoint ?? item.defaultEndpoint;
     const running = test?.phase === 'running';
+    const methodSelector = isCustom || externalMcpRequired || (!item.oauthProvider
+        && item.methods.filter((method) => method.supported).length > 1);
+    const renderCredentialField = (name: string, required: boolean) => {
+        const field = item.fields.find((candidate) => candidate.name === name);
+        if (!field) return null;
+        const input = field.type === 'password'
+            ? <Input.Password placeholder={field.placeholder} autoComplete="new-password"/>
+            : <Input placeholder={field.placeholder} autoComplete="off"/>;
+        return <Form.Item key={name} label={field.label} name={name} extra={field.helpText}
+                          rules={required ? [{required: true, whitespace: true, message: `Enter ${field.label.toLowerCase()}`}] : undefined}>
+            {input}
+        </Form.Item>;
+    };
 
     return (
         <div className="wizard">
@@ -205,7 +255,7 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                                 connectionName: uniqueConnectionName(item.defaultConnectionName, existingNames),
                                 deployment: item.deployments?.[0]?.id,
                                 endpoint: initialEndpoint,
-                                authType: isCustom || item.localServerHelp ? 'NONE' : 'BEARER',
+                                connectionMethod: defaultMethod,
                                 authMethod: item.oauthProvider ? 'oauth' : 'token',
                             }}
                         >
@@ -255,31 +305,36 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                                     {pattern: /^https?:\/\/\S+$/i, message: 'The address must start with http:// or https://'},
                                 ]}
                             >
-                                <Input placeholder="https://tools.yourcompany.com/mcp" autoComplete="off"/>
+                                <Input placeholder="https://tools.yourcompany.com/mcp" autoComplete="off"
+                                       disabled={!item.endpointEditable}/>
                             </Form.Item>
 
                             <Form.Item label="Transport">
                                 <Select disabled value="STREAMABLE_HTTP" options={[{value: 'STREAMABLE_HTTP', label: 'Streamable HTTP'}]}/>
                             </Form.Item>
 
-                            {isCustom && (
-                                <Form.Item label="Authentication" name="authType">
-                                    <Select options={[{value: 'NONE', label: 'None'}, {value: 'BEARER', label: 'Bearer token'}]}/>
+                            {methodSelector && (
+                                <Form.Item label="Authentication" name="connectionMethod">
+                                    <Select options={item.methods.filter((method) => method.supported)
+                                        .map((method) => ({value: method.id, label: method.label}))}/>
                                 </Form.Item>
                             )}
 
                             {!isCustom && item.oauthProvider && (
                                 <Form.Item label="How should Connect AI access it?" name="authMethod"
-                                           extra={oauthReady === false
-                                               ? `Sign-in with ${item.name} is not set up on this server yet (an admin sets its OAuth client id and secret). Use an access token for now.`
+                                           extra={oauthReady === false && !oauthAlternative
+                                               ? `Sign-in with ${item.name} is not configured on this server yet. Ask the administrator to configure the OAuth client.`
+                                               : oauthReady === false
+                                                   ? `Sign-in with ${item.name} is not configured on this server yet. An access token is available as an alternative.`
                                                : authType === 'OAUTH'
-                                                   ? `A ${item.name} window opens; approve access there. No token to copy.`
+                                                   ? `Requested access: ${oauthProvider?.scopes?.join(', ') || 'provider-defined scopes'}. A ${item.name} window opens; approve access there. No token to copy.`
                                                    : undefined}>
                                     <Segmented
                                         block
                                         options={[
-                                            {label: `Sign in with ${item.name}`, value: 'oauth', disabled: oauthReady !== true},
-                                            {label: 'Access token', value: 'token'},
+                                            ...(item.methods.some((method) => method.id === 'OAUTH_APP' && method.supported)
+                                                ? [{label: `Sign in with ${item.name}`, value: 'oauth', disabled: oauthReady !== true}] : []),
+                                            ...(oauthAlternative ? [{label: 'Access token', value: 'token'}] : []),
                                         ]}
                                     />
                                 </Form.Item>
@@ -289,16 +344,21 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                                 <p className="secure-note">{item.localServerHelp}</p>
                             )}
 
-                            {authType === 'BEARER' && (
-                                <Form.Item
-                                    label={item.tokenLabel}
-                                    name="token"
-                                    extra={item.tokenHelp}
-                                    rules={[{required: true, whitespace: true, message: 'Paste the token to continue'}]}
-                                >
-                                    <Input.Password placeholder="Paste your token" autoComplete="new-password"/>
-                                </Form.Item>
-                            )}
+                            {connectMethod === 'TOKEN_BEARER' && renderCredentialField('token', true)}
+                            {connectMethod === 'TOKEN_BASIC' && <>
+                                {renderCredentialField('username', true)}
+                                {renderCredentialField('token', true)}
+                            </>}
+                            {connectMethod === 'TOKEN_HEADER' && <>
+                                {renderCredentialField('headerName', true)}
+                                {renderCredentialField('headerValue', true)}
+                            </>}
+                            {connectMethod === 'TOKEN_HEADERS' && <>
+                                {renderCredentialField('headerName', true)}
+                                {renderCredentialField('headerValue', true)}
+                                {renderCredentialField('headerName2', false)}
+                                {renderCredentialField('headerValue2', false)}
+                            </>}
                         </Form>
                         <p className="secure-note"><ShieldCheck size={16}/>Credentials are encrypted at rest and never sent to the LLM.</p>
                     </div>
@@ -342,11 +402,26 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
 
                 <aside className="wizard-about">
                     <h3>About this MCP server</h3>
-                    <p>{item.about}</p>
-                    <h4>What you can do</h4>
-                    <ul>{item.canDo.map((c) => <li key={c}><Check size={14}/>{c}</li>)}</ul>
-                    <h4>Requires</h4>
-                    <ul className="plain">{item.requires.map((r) => <li key={r}>{r}</li>)}</ul>
+                {item.connectorMode === 'external-mcp-required' ? (
+                    <>
+                        <p>{item.name} does not have a verified, managed MCP endpoint configured in this application. Provide the endpoint of an MCP server for this service. Connect AI will only show capabilities actually returned by that server.</p>
+                        <h4>Required</h4>
+                        <ul className="plain"><li>A reachable Streamable HTTP MCP endpoint</li><li>A supported bearer token if that MCP server requires one</li></ul>
+                    </>
+                ) : (
+                    <>
+                        <p>{item.permissionsText}</p>
+                        <h4>What you can do</h4>
+                        <ul>{item.scopes.map((scope) => <li key={scope}><Check size={14}/>{scope}</li>)}</ul>
+                        <h4>Requires</h4>
+                        <ul className="plain">{item.requires.map((r) => <li key={r}>{r}</li>)}</ul>
+                    </>
+                )}
+                <details className="connector-help">
+                    <summary>Connection instructions</summary>
+                    <ol>{item.help.steps.map((step) => <li key={step}>{step}</li>)}</ol>
+                    {item.help.docsUrl && <a href={item.help.docsUrl} target="_blank" rel="noreferrer">Open documentation</a>}
+                </details>
                 </aside>
             </div>
 
@@ -354,7 +429,7 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                 {step === 1 ? (
                     <>
                         <Button onClick={onClose}>Cancel</Button>
-                        <Button type="primary" onClick={handleTest}>Test Connection</Button>
+                        <Button type="primary" disabled={authType === 'OAUTH' && oauthReady !== true} onClick={handleTest}>Test Connection</Button>
                     </>
                 ) : (
                     <>
@@ -376,7 +451,7 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
 interface ToolConnectModalProps {
     open: boolean;
     /** null opens the custom-server form. */
-    preset: CatalogItem | null;
+    preset: CatalogItem;
     /** Changes on every opening so each opening starts with a clean form and test state. */
     session: number;
     /** Names already used by saved connections. */
@@ -390,7 +465,7 @@ const ToolConnectModal = ({open, preset, session, existingNames, onClose, onChan
     <Modal open={open} footer={null} title={null} centered width={900} mask={{closable: false}} destroyOnHidden onCancel={onClose}
            className="tool-wizard-modal" styles={{container: {padding: 0, overflow: 'hidden'}}}>
         {/* antd keeps closed content mounted until the animation ends, so a new key per opening is what resets it. */}
-        <Wizard key={`${preset?.id ?? 'custom'}-${session}`} item={preset ?? CUSTOM_ITEM}
+        <Wizard key={`${preset.id}-${session}`} item={preset}
                 existingNames={existingNames} onClose={onClose} onChanged={onChanged}/>
     </Modal>
 );

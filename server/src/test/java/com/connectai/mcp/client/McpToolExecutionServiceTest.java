@@ -150,7 +150,8 @@ class McpToolExecutionServiceTest {
 
         assertEquals(502, exception.getStatusCode().value());
         assertTrue(exception.getReason().contains("MCP tool 'echo' failed"));
-        assertTrue(exception.getReason().contains("remote MCP failure"));
+        assertTrue(exception.getReason().contains("unexpected error"));
+        assertFalse(exception.getReason().contains("remote MCP failure"));
     }
 
     @Test

@@ -7,8 +7,15 @@ import static org.junit.jupiter.api.Assertions.*;
 class SecretEncryptionServiceTest {
 
     @Test
+    void rejectsMissingOrShortEncryptionKey() {
+        assertThrows(IllegalStateException.class, () -> new SecretEncryptionService("short"));
+        assertThrows(IllegalStateException.class, () ->
+                new SecretEncryptionService("<generate-a-high-entropy-random-string-at-least-32-characters>"));
+    }
+
+    @Test
     void encryptDecryptRoundTripReturnsOriginalSecret() {
-        SecretEncryptionService service = new SecretEncryptionService("test-encryption-key");
+        SecretEncryptionService service = new SecretEncryptionService("test-only-encryption-key-long-enough-123456");
 
         String encrypted = service.encrypt("Bearer-secret-123");
 
@@ -19,7 +26,7 @@ class SecretEncryptionServiceTest {
 
     @Test
     void encryptionUsesRandomIv() {
-        SecretEncryptionService service = new SecretEncryptionService("test-encryption-key");
+        SecretEncryptionService service = new SecretEncryptionService("test-only-encryption-key-long-enough-123456");
 
         String first = service.encrypt("same-secret");
         String second = service.encrypt("same-secret");
@@ -31,7 +38,7 @@ class SecretEncryptionServiceTest {
 
     @Test
     void blankSecretIsStoredAsNull() {
-        SecretEncryptionService service = new SecretEncryptionService("test-encryption-key");
+        SecretEncryptionService service = new SecretEncryptionService("test-only-encryption-key-long-enough-123456");
 
         assertNull(service.encrypt(null));
         assertNull(service.encrypt("   "));

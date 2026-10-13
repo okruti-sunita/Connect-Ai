@@ -11,13 +11,19 @@ import java.util.UUID;
  * @param connectionNames       every connected MCP server (id to label), so the answer can tell
  *                              which connections were actually queried and which were not
  */
-public record AnswerHints(List<String> uncoveredCapabilities, Map<UUID, String> connectionNames) {
+public record AnswerHints(List<String> uncoveredCapabilities, Map<UUID, String> connectionNames,
+                          List<String> warnings) {
 
-    public static final AnswerHints NONE = new AnswerHints(List.of(), Map.of());
+    public static final AnswerHints NONE = new AnswerHints(List.of(), Map.of(), List.of());
+
+    public AnswerHints(List<String> uncoveredCapabilities, Map<UUID, String> connectionNames) {
+        this(uncoveredCapabilities, connectionNames, List.of());
+    }
 
     public AnswerHints {
         uncoveredCapabilities = uncoveredCapabilities == null ? List.of() : List.copyOf(uncoveredCapabilities);
         connectionNames = connectionNames == null ? Map.of() : Map.copyOf(connectionNames);
+        warnings = warnings == null ? List.of() : List.copyOf(warnings);
     }
 
     /** Connections that exist but contributed no successful step. Empty with fewer than two connections. */

@@ -4,9 +4,11 @@ import com.connectai.mcp.api.dto.McpConnectionResponse;
 import com.connectai.mcp.entity.EMcpServer;
 import com.connectai.mcp.model.McpConnectionStatus;
 import com.connectai.mcp.repository.McpServerRepository;
+import com.connectai.mcp.oauth.OAuthService;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -40,15 +42,27 @@ public class McpConnectionService {
     private final McpServerRepository repository;
     private final McpClientFactory clientFactory;
     private final McpClientRegistry clientRegistry;
+    private final OAuthService oauth;
     private final Map<UUID, Object> locks = new ConcurrentHashMap<>();
 
+    @Autowired
+    public McpConnectionService(
+            McpServerRepository repository,
+            McpClientFactory clientFactory,
+            McpClientRegistry clientRegistry,
+            OAuthService oauth) {
+        this.repository = repository;
+        this.clientFactory = clientFactory;
+        this.clientRegistry = clientRegistry;
+        this.oauth = oauth;
+    }
+
+    /** Constructor retained for focused tests and token-only service setups. */
     public McpConnectionService(
             McpServerRepository repository,
             McpClientFactory clientFactory,
             McpClientRegistry clientRegistry) {
-        this.repository = repository;
-        this.clientFactory = clientFactory;
-        this.clientRegistry = clientRegistry;
+        this(repository, clientFactory, clientRegistry, null);
     }
 
     public McpConnectionResponse connect(UUID serverId) {
@@ -135,7 +149,8 @@ public class McpConnectionService {
                     server.getName(),
                     elapsedMs(started),
                     error);
-            log.debug("MCP handshake failure detail: serverId={}", serverId, exception);
+            log.debug("MCP handshake failure type: serverId={}, exceptionType={}",
+                    serverId, exception.getClass().getSimpleName());
 
             HttpStatus status = isConfigurationError(exception) ? HttpStatus.BAD_REQUEST : HttpStatus.BAD_GATEWAY;
             throw new ResponseStatusException(status, "Could not connect to '" + server.getName() + "': " + error, exception);
@@ -178,6 +193,7 @@ public class McpConnectionService {
                         HttpStatus.CONFLICT,
                         "'" + server.getName() + "' is still connected. Disconnect it before removing it.");
             }
+            if (oauth != null) oauth.revoke(server);
             repository.delete(server);
             log.info("MCP server removed: serverId={}, name={}", serverId, server.getName());
         }
@@ -191,7 +207,7 @@ public class McpConnectionService {
         McpConnectionStatus status = server.getStatus();
         String error = server.getLastError();
 
-        if (connected) {
+        if (connected && (status == McpConnectionStatus.CONNECTED || status == McpConnectionStatus.REGISTERED)) {
             status = McpConnectionStatus.CONNECTED;
         } else if (status == McpConnectionStatus.CONNECTED) {
             // Persisted state claims a session that does not exist in this process.
@@ -204,7 +220,7 @@ public class McpConnectionService {
         return new McpConnectionResponse(
                 serverId,
                 status,
-                connected,
+                connected && status == McpConnectionStatus.CONNECTED,
                 null,
                 null,
                 null,
@@ -230,7 +246,8 @@ public class McpConnectionService {
         try {
             client.closeGracefully();
         } catch (Exception closeException) {
-            log.debug("Ignoring error while closing MCP client: {}", closeException.toString());
+            log.debug("Ignoring error while closing MCP client: exceptionType={}",
+                    closeException.getClass().getSimpleName());
         }
     }
 
@@ -270,15 +287,13 @@ public class McpConnectionService {
                 return "The MCP endpoint was not found (HTTP 404). Check the endpoint path.";
             }
         }
-        String message = exception.getMessage();
-        if (message == null || message.isBlank()) {
-            message = root.getMessage();
+        if (exception instanceof IllegalArgumentException) {
+            return "The MCP endpoint or connection settings are invalid. Verify the URL and authentication method.";
         }
-        if (message == null || message.isBlank()) {
-            message = root.getClass().getSimpleName();
+        if (exception instanceof UnsupportedOperationException) {
+            return "This MCP transport or authentication method is not supported.";
         }
-        message = message.replaceAll("(?i)bearer\\s+[A-Za-z0-9._\\-]+", "Bearer ***");
-        return message.length() > 500 ? message.substring(0, 500) + "..." : message;
+        return "The MCP server returned an unexpected error. Verify the endpoint and credentials, then retry.";
     }
 
     private static String safeEndpointHost(String endpoint) {

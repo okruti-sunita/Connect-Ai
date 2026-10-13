@@ -1,10 +1,11 @@
-import {CATALOG, type CatalogItem} from './tool-catalog';
+import type {CatalogItem} from './tool-catalog';
 import type {ConnectionStatus} from './tools-api';
 
 export const STATUS_LABEL: Record<ConnectionStatus, string> = {
     REGISTERED: 'Not connected',
     CONNECTING: 'Connecting',
     CONNECTED: 'Connected',
+    REAUTH_REQUIRED: 'Sign-in expired',
     FAILED: 'Failed',
     DISCONNECTED: 'Disconnected',
 };
@@ -23,7 +24,7 @@ export function relativeTime(iso?: string | null): string {
 }
 
 /** The backend does not store which catalog entry a tool came from, so match on the name. */
-export function findCatalogItem(toolName: string): CatalogItem | undefined {
+export function findCatalogItem(toolName: string, catalog: CatalogItem[] = []): CatalogItem | undefined {
     const name = toolName.toLowerCase();
-    return CATALOG.find((c) => name.includes(c.id) || name.includes(c.name.toLowerCase()));
+    return catalog.find((c) => name.includes(c.key) || name.includes(c.name.toLowerCase()));
 }

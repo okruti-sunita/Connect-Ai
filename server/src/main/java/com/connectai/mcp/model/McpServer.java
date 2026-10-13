@@ -1,6 +1,7 @@
 package com.connectai.mcp.model;
 
 import com.connectai.mcp.entity.EMcpServer;
+import com.connectai.mcp.catalog.ConnectMethod;
 
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -20,7 +21,9 @@ public record McpServer(
         boolean runtimeConnected,
         boolean secretConfigured,
         /** OAuth provider id for authType OAUTH; null otherwise. secretConfigured then means "signed in". */
-        String oauthProvider
+        String oauthProvider,
+        String catalogKey,
+        ConnectMethod connectMethod
 ) {
 
     public static McpServer from(EMcpServer entity) {
@@ -45,8 +48,11 @@ public record McpServer(
                 entity.getCreatedAt(),
                 entity.getUpdatedAt(),
                 runtimeConnected,
-                entity.getEncryptedSecret() != null && !entity.getEncryptedSecret().isBlank(),
-                entity.getOauthProvider()
+                (entity.getEncryptedSecret() != null && !entity.getEncryptedSecret().isBlank())
+                        || (entity.getEncryptedAuthConfig() != null && !entity.getEncryptedAuthConfig().isBlank()),
+                entity.getOauthProvider(),
+                entity.getCatalogKey(),
+                entity.getConnectMethod()
         );
     }
 }

@@ -174,6 +174,53 @@ class LlmMcpToolPlannerRobustnessTest {
     }
 
     @Test
+    void firstPersonCommitsAndTicketsQuestionUsesIdentityToolEvenWhenTopicFilterDropsIt() {
+        Map<String, Object> emptySchema = Map.of("type", "object", "properties", Map.of());
+        List<McpToolCandidate> tools = List.of(
+                new McpToolCandidate(SERVER, "get_me", "", "Get details of the authenticated GitHub user.",
+                        emptySchema),
+                new McpToolCandidate(SERVER, "list_commits", "", "List commits in a repository.", emptySchema),
+                new McpToolCandidate(SERVER, "list_issues", "", "List issues for a repository.", emptySchema));
+        String question = "what commits total and what total tickets i worked in 2026 and in which project";
+        SequenceLlm llm = new SequenceLlm();
+
+        PlannerDecision decision = new LlmMcpToolPlanner(llm, 8, 3)
+                .decide(question, tools, AgentExecutionState.initial(question));
+
+        assertThat(decision.isFinish()).isFalse();
+        assertThat(decision.plan().toolName()).isEqualTo("get_me");
+        assertThat(decision.plan().serverId()).isEqualTo(SERVER);
+        assertThat(decision.plan().arguments()).isEmpty();
+        assertThat(llm.prompts).isEmpty();
+    }
+
+    @Test
+    void multiPartQuestionStillPlansAnAvailableCapabilityWhenAnotherIsMissing() {
+        Map<String, Object> emptySchema = Map.of("type", "object", "properties", Map.of());
+        List<McpToolCandidate> tools = List.of(
+                new McpToolCandidate(SERVER, "get_me", "", "Get details of the authenticated GitHub user.",
+                        emptySchema),
+                new McpToolCandidate(SERVER, "list_commits", "", "List commits in a repository.", emptySchema));
+        String question = "what commits total and what total tickets i worked on in 2026 and in which project";
+        AgentExecutionState afterIdentity = AgentExecutionState.initial(question).addStep(new AgentExecutionStep(1,
+                new ToolSelectionPlan(SERVER, "get_me", Map.of(), "identify account"),
+                new ToolExecutionResult("get_me", false,
+                        List.of(new ToolExecutionContent("text", "{\"login\":\"octo\"}")), null),
+                AgentStepStatus.SUCCESS));
+        SequenceLlm llm = new SequenceLlm()
+                .then("{\"action\":\"T1\",\"arguments\":{},\"reason\":\"Gather the commit evidence that is available.\"}");
+
+        PlannerDecision decision = new LlmMcpToolPlanner(llm, 8, 3).decide(question, tools, afterIdentity);
+
+        assertThat(com.connectai.agent.ToolShortlister.topicCoverage(question, tools).uncoveredCapabilities())
+                .contains("tickets");
+        assertThat(decision.isFinish()).isFalse();
+        assertThat(decision.plan().toolName()).isEqualTo("list_commits");
+        assertThat(llm.prompts.get(0)).contains("Continue gathering evidence for any other answerable parts")
+                .contains("no connected tool provides data about");
+    }
+
+    @Test
     void loginScopedCallIsReplayedOnTheOtherConnectionWithItsOwnLogin() {
         UUID work = UUID.fromString("00000000-0000-0000-0000-0000000000bb");
         Map<String, Object> searchSchema = Map.of("type", "object",
@@ -207,6 +254,30 @@ class LlmMcpToolPlannerRobustnessTest {
         assertThat(LlmMcpToolPlanner.mentionedRepositories("What are the latest commits in okruti-raghuraj/awsdemo1?"))
                 .containsExactly("owner=okruti-raghuraj, repo=awsdemo1");
         assertThat(LlmMcpToolPlanner.mentionedRepositories("Who am I?")).isEmpty();
+    }
+
+    @Test
+    void singularRepositoryMetadataQuestionCanSelectPluralNamedSearchTool() {
+        UUID serverId = UUID.randomUUID();
+        Map<String, Object> searchSchema = Map.of("type", "object",
+                "properties", Map.of("query", Map.of("type", "string")), "required", List.of("query"));
+        List<McpToolCandidate> tools = List.of(
+                new McpToolCandidate(serverId, "list_branches", "", "List branches in a repository.",
+                        Map.of("type", "object", "properties", Map.of()), true),
+                new McpToolCandidate(serverId, "search_repositories", "",
+                        "Find GitHub repositories by name and metadata.", searchSchema, true));
+        String question = "Find repository torvalds/linux and report its language and default branch.";
+        SequenceLlm llm = new SequenceLlm().then(
+                "{\"action\":\"T2\",\"arguments\":{\"query\":\"repo:torvalds/linux\"},\"reason\":\"Search for repository metadata.\"}");
+
+        PlannerDecision decision = new LlmMcpToolPlanner(llm, 6, 3)
+                .decide(question, tools, AgentExecutionState.initial(question));
+
+        assertThat(decision.isFinish()).isFalse();
+        assertThat(decision.plan().serverId()).isEqualTo(serverId);
+        assertThat(decision.plan().toolName()).isEqualTo("search_repositories");
+        assertThat(decision.plan().arguments()).containsEntry("query", "repo:torvalds/linux");
+        assertThat(llm.prompts.get(0)).contains("T2 search_repositories");
     }
 
     /** Reported case: search_users repeated three times with only sort/order changed. */

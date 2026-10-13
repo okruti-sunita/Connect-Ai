@@ -26,10 +26,12 @@ connectai:
   cors:
     allowed-origins: ${CONNECTAI_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
   security:
-    encryption-key: ${CONNECTAI_ENCRYPTION_KEY:local-dev-only-change-me}
+    encryption-key: ${CONNECTAI_ENCRYPTION_KEY:}
   oauth:
     # Must equal the "Authorization callback URL" of each OAuth app you register.
     redirect-uri: ${CONNECTAI_OAUTH_REDIRECT_URI:http://localhost:8080/connect-ai/api/oauth/callback}
+    # Exact origin of the browser app; OAuth callback messages are sent only to this origin.
+    frontend-origin: ${CONNECTAI_FRONTEND_ORIGIN:http://localhost:5173}
     providers:
       github:
         display-name: GitHub
@@ -40,9 +42,20 @@ connectai:
         # OAuth apps only offer coarse scopes; investigations still only use read-only tools.
         scopes: ${GITHUB_OAUTH_SCOPES:repo read:org read:user}
         pkce: true
+      google:
+        display-name: Google Drive
+        authorize-url: https://accounts.google.com/o/oauth2/v2/auth
+        token-url: https://oauth2.googleapis.com/token
+        client-id: ${GOOGLE_OAUTH_CLIENT_ID:}
+        client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:}
+        scopes: https://www.googleapis.com/auth/drive.readonly
+        access-type: offline
+        revocation-url: https://oauth2.googleapis.com/revoke
+        pkce: true
   mcp:
     request-timeout-seconds: ${CONNECTAI_MCP_REQUEST_TIMEOUT_SECONDS:20}
     connect-timeout-seconds: ${CONNECTAI_MCP_CONNECT_TIMEOUT_SECONDS:10}
+    allow-private-hosts: ${CONNECTAI_MCP_ALLOW_PRIVATE_HOSTS:false}
   seed-demo-data: ${CONNECTAI_SEED_DEMO_DATA:false}
   tools:
     mode: ${CONNECTAI_TOOLS_MODE:mcp}

@@ -1,140 +1,131 @@
-export type ToolCategory = 'Source Control' | 'Tickets' | 'Observability' | 'Chat' | 'Incident' | 'Wiki' | 'Custom';
+export type ToolCategory = 'Source Control' | 'Tickets' | 'Observability' | 'Chat' | 'Incident' | 'Custom';
+export type ConnectMethod = 'OAUTH_APP' | 'OAUTH_DISCOVERY' | 'TOKEN_BEARER' | 'TOKEN_BASIC' | 'TOKEN_HEADER' | 'TOKEN_HEADERS' | 'NONE';
+export type ConnectorStatus = 'AVAILABLE' | 'CONNECTED' | 'NEEDS_SIGN_IN' | 'SETUP_REQUIRED' | 'CONNECTION_ERROR';
 
-/** Chips shown above the catalog. Wiki tools are reachable under "All". */
 export const CATEGORY_FILTERS: ToolCategory[] = ['Source Control', 'Tickets', 'Observability', 'Chat', 'Incident', 'Custom'];
 
-export interface DeploymentOption {
-    id: string;
+export interface CatalogMethod {
+    id: ConnectMethod;
     label: string;
-    /** '' means the user must type the address (self-hosted or custom). */
-    endpoint: string;
+    supported: boolean;
 }
 
+export interface CatalogField {
+    name: string;
+    label: string;
+    type: 'text' | 'password' | 'select';
+    required: boolean;
+    placeholder?: string;
+    helpText?: string;
+    options?: {label: string; value: string}[];
+}
+
+export interface CatalogVariant {
+    key: string;
+    label: string;
+    endpoint: string;
+    verified: boolean;
+}
+
+/** Frontend representation of the server-owned catalog entry. */
 export interface CatalogItem {
     id: string;
+    key: string;
     name: string;
+    description: string;
+    category: ToolCategory;
+    iconKey: string;
+    methods: CatalogMethod[];
+    defaultEndpoint: string;
+    endpointEditable: boolean;
+    endpointVerified: boolean;
+    variants: CatalogVariant[];
+    fields: CatalogField[];
+    permissionsText: string;
+    help: {steps: string[]; docsUrl: string};
+    scopes: string[];
+    oauthProvider?: string;
+    connectionCount: number;
+    status: ConnectorStatus;
     badge: string;
     color: string;
-    /** Optional real logo. When absent a coloured badge is drawn. */
     logoUrl?: string;
-    category: ToolCategory;
+    /** Compatibility aliases consumed by the existing wizard and detail view. */
     blurb: string;
     about: string;
     canDo: string[];
     requires: string[];
     defaultConnectionName: string;
-    /**
-     * Default MCP server address. Leave '' until you have verified the vendor's URL:
-     * the wizard then asks the user for it. Only GitHub is filled in here.
-     */
     endpoint: string;
-    deployments?: DeploymentOption[];
+    deployments: {id: string; label: string; endpoint: string}[];
     tokenLabel: string;
     tokenHelp: string;
-    /** OAuth provider id (server config connectai.oauth.providers) when "Sign in with ..." is offered. */
-    oauthProvider?: string;
-    /** Set when the MCP server runs on the user's machine and holds its own credentials: no token field. */
     localServerHelp?: string;
+    connectorMode: 'managed-mcp' | 'local-mcp' | 'external-mcp-required';
 }
 
-type EntryInput = Pick<CatalogItem, 'id' | 'name' | 'badge' | 'color' | 'category' | 'blurb' | 'canDo' | 'requires'> &
-    Partial<CatalogItem>;
+export interface CatalogConnectorDefinition {
+    key: string;
+    name: string;
+    description: string;
+    category: ToolCategory;
+    iconKey: string;
+    methods: CatalogMethod[];
+    defaultEndpoint: string;
+    endpointEditable: boolean;
+    endpointVerified: boolean;
+    variants: CatalogVariant[];
+    fields: CatalogField[];
+    permissionsText: string;
+    help: {steps: string[]; docsUrl: string};
+    scopes: string[];
+    oauthProvider?: string;
+}
 
-function entry(o: EntryInput): CatalogItem {
+export interface CatalogApiEntry {
+    connector: CatalogConnectorDefinition;
+    connectionCount: number;
+    status: ConnectorStatus;
+    connections: CatalogConnectionSummary[];
+}
+
+export interface CatalogConnectionSummary {
+    id: string;
+    name: string;
+    status: string;
+    runtimeConnected: boolean;
+    catalogKey: string | null;
+    connectMethod: ConnectMethod | null;
+}
+
+const CATEGORY_COLORS: Record<ToolCategory, string> = {
+    'Source Control': '#24292f', Tickets: '#2864dc', Observability: '#c2410c',
+    Chat: '#7a3fe4', Incident: '#067a46', Custom: '#5b6178',
+};
+
+export function mapCatalogEntry(entry: CatalogApiEntry): CatalogItem {
+    const connector = entry.connector;
+    const connectorMode = connector.defaultEndpoint.startsWith('http://localhost')
+        ? 'local-mcp'
+        : connector.endpointVerified && connector.defaultEndpoint ? 'managed-mcp' : 'external-mcp-required';
+    const passwordField = connector.fields.find((field) => field.type === 'password');
     return {
-        defaultConnectionName: `${o.name} - Main`,
-        endpoint: '',
-        tokenLabel: 'Access token',
-        tokenHelp: 'Use a token with read-only access.',
-        about: `${o.blurb} Connect AI reads from it to build the context for your investigations.`,
-        ...o,
+        ...connector,
+        id: connector.key,
+        connectionCount: entry.connectionCount,
+        status: entry.status,
+        badge: connector.name.slice(0, 2).toUpperCase(),
+        color: CATEGORY_COLORS[connector.category] ?? '#475569',
+        blurb: connector.description,
+        about: connector.permissionsText,
+        canDo: [],
+        requires: connector.help.steps,
+        defaultConnectionName: `${connector.name} - Main`,
+        endpoint: connector.defaultEndpoint,
+        deployments: connector.variants.map((variant) => ({id: variant.key, label: variant.label, endpoint: variant.endpoint})),
+        tokenLabel: passwordField?.label ?? 'Access token',
+        tokenHelp: passwordField?.helpText ?? 'Use the minimum permissions required.',
+        ...(connectorMode === 'local-mcp' ? {localServerHelp: connector.permissionsText} : {}),
+        connectorMode,
     };
 }
-
-export const CATALOG: CatalogItem[] = [
-    entry({
-        id: 'github', name: 'GitHub', badge: 'GH', color: '#24292f', category: 'Source Control',
-        oauthProvider: 'github',
-        blurb: 'Search code, review pull requests and inspect commits.',
-        about: 'Connect to GitHub to search code, review PRs, inspect commits and issues.',
-        canDo: ['Search code and repositories', 'View PRs and reviews', 'Inspect commits and diffs', 'Read issues and comments'],
-        requires: ['Repo scope (read)', 'Issues scope (read)'],
-        endpoint: 'https://api.githubcopilot.com/mcp/',
-        deployments: [
-            {id: 'cloud', label: 'Cloud (github.com)', endpoint: 'https://api.githubcopilot.com/mcp/'},
-            {id: 'enterprise', label: 'GitHub Enterprise', endpoint: ''},
-            {id: 'custom', label: 'Custom', endpoint: ''},
-        ],
-        tokenLabel: 'Personal Access Token',
-        tokenHelp: 'Create a token with read access to repositories, issues and pull requests.',
-    }),
-    entry({
-        id: 'jira', name: 'Jira', badge: 'JI', color: '#2864dc', category: 'Tickets',
-        blurb: 'Find tickets, bugs and sprint history.',
-        // Local mcp-atlassian server (read-only); the Jira email + API token live in its own .env file.
-        endpoint: 'http://localhost:9000/mcp',
-        localServerHelp: 'Connects to the local Jira MCP server (mcp-atlassian, read-only). Your Jira email and API token '
-            + 'stay in its .env file on this machine; Connect AI never sees them.',
-        canDo: ['Find tickets by keyword or status', 'Read ticket details and comments', 'See sprint and project history'],
-        requires: ['Read access to your projects'],
-    }),
-    entry({
-        id: 'slack', name: 'Slack', badge: 'SL', color: '#7a3fe4', category: 'Chat',
-        blurb: 'Search team discussions and decisions.',
-        canDo: ['Search channels you can access', 'Read threads and replies', 'Link discussions to incidents'],
-        requires: ['Access to the channels you share'],
-    }),
-    entry({
-        id: 'grafana', name: 'Grafana', badge: 'GR', color: '#c2410c', category: 'Observability',
-        blurb: 'Visualize and analyze your metrics.',
-        canDo: ['Read dashboards and panels', 'See firing and past alerts', 'Query metrics and logs'],
-        requires: ['A service account with Viewer role'],
-    }),
-    entry({
-        id: 'splunk', name: 'Splunk', badge: 'SP', color: '#107c41', category: 'Observability',
-        blurb: 'Analyze and monitor machine-generated data.',
-        canDo: ['Run searches over your logs', 'Compare errors around a deployment', 'Find similar past errors'],
-        requires: ['A token with search access'],
-    }),
-    entry({
-        id: 'pagerduty', name: 'PagerDuty', badge: 'PD', color: '#067a46', category: 'Incident',
-        blurb: 'Real-time operations and incident response.',
-        canDo: ['Read incidents and timelines', 'See who was on call', 'Find related past incidents'],
-        requires: ['A read-only API token'],
-    }),
-    entry({
-        id: 'datadog', name: 'Datadog', badge: 'DD', color: '#632ca6', category: 'Observability',
-        blurb: 'Cloud-scale monitoring and analytics.',
-        canDo: ['Query metrics and logs', 'Read monitors and alerts', 'Inspect traces'],
-        requires: ['An API key with read access'],
-    }),
-    entry({
-        id: 'linear', name: 'Linear', badge: 'LN', color: '#4b4fd6', category: 'Tickets',
-        blurb: 'Modern issue tracking for software teams.',
-        canDo: ['Search issues and projects', 'Read issue history', 'See cycles and owners'],
-        requires: ['A read-only API key'],
-    }),
-    entry({
-        id: 'notion', name: 'Notion', badge: 'NO', color: '#2f2f2f', category: 'Wiki',
-        blurb: 'All-in-one workspace for notes and projects.',
-        canDo: ['Search pages and databases', 'Read runbooks and notes'],
-        requires: ['Pages shared with the integration'],
-    }),
-    entry({
-        id: 'confluence', name: 'Confluence', badge: 'CF', color: '#0b57d0', category: 'Wiki',
-        blurb: 'Team collaboration and knowledge sharing.',
-        canDo: ['Search pages and spaces', 'Read runbooks and design docs', 'Find who owns a service'],
-        requires: ['Read access to your spaces'],
-    }),
-];
-
-export const CUSTOM_ITEM: CatalogItem = entry({
-    id: 'custom', name: 'Custom MCP Server', badge: '+', color: '#5b6178', category: 'Custom',
-    blurb: 'Manually configure a connection.',
-    about: 'Connect any server that speaks MCP, such as an internal tool. Connect AI discovers what it offers after connecting.',
-    canDo: ['Connect an internal or less common tool', 'Capabilities are discovered after connecting'],
-    requires: ['The server address from its owner', 'A token, if the server needs one'],
-    defaultConnectionName: '',
-    tokenLabel: 'Bearer token',
-    tokenHelp: 'Sent securely with every request.',
-});

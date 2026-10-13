@@ -13,3 +13,9 @@ spring:
   h2:
     console:
       enabled: false
+
+connectai:
+  mcp:
+    allow-private-hosts: true
+  security:
+    encryption-key: test-only-encryption-key-not-for-any-deployment

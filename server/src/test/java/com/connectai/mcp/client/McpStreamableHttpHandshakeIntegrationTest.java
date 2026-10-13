@@ -80,7 +80,7 @@ class McpStreamableHttpHandshakeIntegrationTest {
                 true);
 
         McpClientFactory factory = new McpClientFactory(
-                new SecretEncryptionService("integration-test-key"),
+                new SecretEncryptionService("integration-test-encryption-key-long-enough-123456"),
                 10,
                 5);
 

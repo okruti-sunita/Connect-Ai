@@ -22,6 +22,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Slf4j
 public class McpToolDiscoveryService {
+    private static final int MAX_TOOL_PAGES = 100;
 
     private final McpServerRepository repository;
     private final McpClientRegistry clientRegistry;
@@ -53,7 +54,8 @@ public class McpToolDiscoveryService {
 
             return new McpToolDiscoveryResponse(serverId, tools);
         } catch (Exception exception) {
-            log.error("MCP discovery failed: serverId={}, cause={}", serverId, exception.toString(), exception);
+            log.error("MCP discovery failed: serverId={}, exceptionType={}",
+                    serverId, exception.getClass().getSimpleName());
             throw new ResponseStatusException(
                     HttpStatus.BAD_GATEWAY,
                     "MCP tool discovery failed for server " + serverId,
@@ -67,8 +69,12 @@ public class McpToolDiscoveryService {
 
         McpSchema.ListToolsResult result = client.listTools();
         log.debug("MCP listTools first page: nullResult={}", result == null);
+        int pages = 0;
 
         while (result != null) {
+            if (++pages > MAX_TOOL_PAGES) {
+                throw new IllegalStateException("MCP tool discovery exceeded the maximum page count");
+            }
             if (result.tools() != null) {
                 tools.addAll(result.tools());
                 log.debug("MCP listTools page: pageTools={}, cumulativeTools={}, hasNextCursor={}", result.tools().size(), tools.size(), result.nextCursor() != null && !result.nextCursor().isBlank());

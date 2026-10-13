@@ -29,6 +29,9 @@ public class OAuthProperties {
     /** Where the provider sends the browser back; must match the OAuth app's callback URL exactly. */
     private String redirectUri = "http://localhost:8080/connect-ai/api/oauth/callback";
 
+    /** Exact browser origin allowed to receive the completion message from the callback popup. */
+    private String frontendOrigin = "http://localhost:5173";
+
     /** How long a started authorization may take before it is discarded. */
     private long attemptTtlSeconds = 600;
 
@@ -41,6 +44,11 @@ public class OAuthProperties {
         private String clientId;
         private String clientSecret;
         private String scopes = "";
+        private String accessType;
+        private String clientAuthentication = "client_secret_post";
+        private String revocationUrl;
+        private Map<String, String> authorizationParameters = new LinkedHashMap<>();
+        private Map<String, String> tokenParameters = new LinkedHashMap<>();
         private boolean pkce = true;
 
         public boolean isConfigured() {
@@ -63,12 +71,28 @@ public class OAuthProperties {
         public void setClientSecret(String clientSecret) { this.clientSecret = clientSecret; }
         public String getScopes() { return scopes; }
         public void setScopes(String scopes) { this.scopes = scopes; }
+        public String getAccessType() { return accessType; }
+        public void setAccessType(String accessType) { this.accessType = accessType; }
+        public String getClientAuthentication() { return clientAuthentication; }
+        public void setClientAuthentication(String clientAuthentication) { this.clientAuthentication = clientAuthentication; }
+        public String getRevocationUrl() { return revocationUrl; }
+        public void setRevocationUrl(String revocationUrl) { this.revocationUrl = revocationUrl; }
+        public Map<String, String> getAuthorizationParameters() { return authorizationParameters; }
+        public void setAuthorizationParameters(Map<String, String> authorizationParameters) {
+            this.authorizationParameters = authorizationParameters == null ? new LinkedHashMap<>() : authorizationParameters;
+        }
+        public Map<String, String> getTokenParameters() { return tokenParameters; }
+        public void setTokenParameters(Map<String, String> tokenParameters) {
+            this.tokenParameters = tokenParameters == null ? new LinkedHashMap<>() : tokenParameters;
+        }
         public boolean isPkce() { return pkce; }
         public void setPkce(boolean pkce) { this.pkce = pkce; }
     }
 
     public String getRedirectUri() { return redirectUri; }
     public void setRedirectUri(String redirectUri) { this.redirectUri = redirectUri; }
+    public String getFrontendOrigin() { return frontendOrigin; }
+    public void setFrontendOrigin(String frontendOrigin) { this.frontendOrigin = frontendOrigin; }
     public long getAttemptTtlSeconds() { return attemptTtlSeconds; }
     public void setAttemptTtlSeconds(long attemptTtlSeconds) { this.attemptTtlSeconds = attemptTtlSeconds; }
     public Map<String, Provider> getProviders() { return providers; }

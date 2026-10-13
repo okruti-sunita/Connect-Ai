@@ -57,10 +57,14 @@ public class LlmGroundedAnswerGenerator implements GroundedAnswerGenerator {
               is not the user's own data). Then say plainly that it cannot be answered from the evidence.
             Put what is missing in "missing" (empty when coverage is full).
             A successful search that found nothing ("total_count": 0 or an empty list) IS a full answer:
-            say that there are none.
+            say that there are none only when the result is complete for the requested scope.
+            For totals, verify the evidence covers the requested date/project scope and all pages.
+            A page of results is not a complete total. If the evidence lacks a direct total or
+            confirmed complete pagination, report only the observed results and mark coverage partial.
 
             Start the answer with the direct answer (or the statement that it cannot be answered).
             Cite supporting evidence ids like [E1] in the text and list them in "citations".
+            Write the answer as concise natural-language prose; never copy or return the evidence JSON.
             Keep it concise. Do not show your reasoning.
             """;
 
@@ -71,6 +75,9 @@ public class LlmGroundedAnswerGenerator implements GroundedAnswerGenerator {
             "(?i)\\b(not (directly |explicitly )?(listed|provided|included|available|shown|mentioned|present|specified)"
                     + "|(does|do) not (contain|include|show|provide|list|specify)"
                     + "|cannot be (answered|determined)|no (information|data|evidence) (about|on|of))\\b");
+    private static final java.util.regex.Pattern CLAIMS_ZERO_RESULTS = java.util.regex.Pattern.compile(
+            "(?i)\\b(?:no|none|zero|0)\\s+(?:[\\w-]+\\s+){0,2}(?:items?|results?|records?|commits?|tickets?|issues?|projects?|repositories?)\\b"
+                    + "|\\b(?:total|count)\\s*(?:is|:|=)?\\s*0\\b");
 
     private final LlmClient llm;
     private final GroundedAnswerContextBuilder contextBuilder;
@@ -107,7 +114,7 @@ public class LlmGroundedAnswerGenerator implements GroundedAnswerGenerator {
         GroundedAnswerContext context = contextBuilder.build(state);
 
         if (!context.hasEvidence()) {
-            return fallback.generate(state);
+            return fallback.generate(state, runHints);
         }
 
         try {
@@ -127,6 +134,11 @@ public class LlmGroundedAnswerGenerator implements GroundedAnswerGenerator {
                 prompt += "\nNo connected tool provides data about: " + String.join(", ", uncovered)
                         + ". The evidence therefore cannot fully answer those parts of the question.\n";
             }
+            List<String> limitations = limitations(context, runHints);
+            if (!limitations.isEmpty()) {
+                prompt += "\nKnown run limitations (must be disclosed; do not claim a complete total): "
+                        + String.join("; ", limitations) + "\n";
+            }
             Draft draft = ask(prompt, context);
 
             if (!draft.valid()) {
@@ -138,11 +150,17 @@ public class LlmGroundedAnswerGenerator implements GroundedAnswerGenerator {
 
             if (!draft.valid()) {
                 log.warn("LLM answer rejected again ({}); using deterministic evidence listing", draft.problems());
-                return fallback.generate(state);
+                return fallback.generate(state, runHints);
             }
 
             Coverage coverage = draft.coverage();
             String text = draft.text();
+            if (coverage == Coverage.FULL && !limitations.isEmpty()) {
+                coverage = Coverage.PARTIAL;
+            }
+            if (!limitations.isEmpty()) {
+                text += "\n\nLimitations: " + String.join("; ", limitations) + ".";
+            }
             if (coverage == Coverage.FULL && !uncovered.isEmpty()) {
                 // Deterministic cap: the question asks for data no connected tool can provide.
                 coverage = Coverage.PARTIAL;
@@ -171,8 +189,21 @@ public class LlmGroundedAnswerGenerator implements GroundedAnswerGenerator {
             log.warn(
                     "LLM grounded answer failed ({}); using deterministic fallback",
                     exception.getMessage());
-            return fallback.generate(state);
+            return fallback.generate(state, runHints);
         }
+    }
+
+    private static List<String> limitations(GroundedAnswerContext context, AnswerHints hints) {
+        List<String> limitations = new ArrayList<>(hints.warnings());
+        limitations.addAll(context.qualityWarnings());
+        if (!context.failureDetails().isEmpty()) {
+            limitations.add("one or more tool calls failed: " + String.join("; ", context.failureDetails()));
+        }
+        if (context.executionStatus() != com.connectai.agent.AgentExecutionStatus.COMPLETED) {
+            limitations.add("tool execution ended as " + context.executionStatus()
+                    + (context.stopReason() == null || context.stopReason().isBlank() ? "" : ": " + context.stopReason()));
+        }
+        return limitations.stream().distinct().toList();
     }
 
     private Draft ask(String prompt, GroundedAnswerContext context) {
@@ -223,7 +254,16 @@ public class LlmGroundedAnswerGenerator implements GroundedAnswerGenerator {
         }
 
         String composed = text.toString();
+        if (looksLikeRawJson(reply.path("answer").asText())) {
+            problems.add("the answer is raw JSON; summarize the supported facts in concise prose");
+        }
         if (coverage != Coverage.NONE) {
+            if (context.qualityWarnings().stream().anyMatch(warning ->
+                    warning.contains("complete total") || warning.contains("additional pages")
+                            || warning.contains("truncated") || warning.contains("incomplete"))
+                    && CLAIMS_ZERO_RESULTS.matcher(reply.path("answer").asText()).find()) {
+                problems.add("the answer claims zero results without evidence that the requested result set is complete");
+            }
             GroundingValidation citations = validator.validate(composed, context.evidence());
             if (!citations.valid()) {
                 problems.add(citations.reason());
@@ -239,6 +279,19 @@ public class LlmGroundedAnswerGenerator implements GroundedAnswerGenerator {
             }
         }
         return new Draft(composed, coverage, problems);
+    }
+
+    private static boolean looksLikeRawJson(String answer) {
+        String candidate = answer == null ? "" : answer.trim();
+        if (!(candidate.startsWith("{") || candidate.startsWith("["))) {
+            return false;
+        }
+        try {
+            new com.fasterxml.jackson.databind.ObjectMapper().readTree(candidate);
+            return true;
+        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+            return false;
+        }
     }
 
     private static Map<Integer, String> argumentsByStep(AgentExecutionState state) {

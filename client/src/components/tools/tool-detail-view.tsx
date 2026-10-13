@@ -1,29 +1,35 @@
 import {useEffect, useState} from 'react';
-import {Button, Input, Switch, Tabs} from 'antd';
+import {Button, Input, Modal, Switch, Tabs, message} from 'antd';
 import {ArrowLeft, Search} from 'lucide-react';
 import ToolLogo from './tool-logo';
 import {toolsApi, type Capability, type McpServerDto} from './tools-api';
-import {findCatalogItem, relativeTime, STATUS_LABEL} from './tools-utils';
+import {relativeTime, STATUS_LABEL} from './tools-utils';
+import type {CatalogItem} from './tool-catalog';
 
 interface ToolDetailViewProps {
     tool: McpServerDto;
+    catalogItem?: CatalogItem;
     busy: boolean;
     onBack: () => void;
     onConnect: () => void;
     onDisconnect: () => void;
     /** Disconnects (if needed) and deletes this connection, after confirmation. */
     onRemove: () => void;
+    onChanged: () => void;
     /** Only for OAuth connections: sign in again (new token) and reconnect. */
     onSignIn?: () => void;
 }
 
-const ToolDetailView = ({tool, busy, onBack, onConnect, onDisconnect, onRemove, onSignIn}: ToolDetailViewProps) => {
-    const item = findCatalogItem(tool.name);
+const ToolDetailView = ({tool, catalogItem, busy, onBack, onConnect, onDisconnect, onRemove, onChanged, onSignIn}: ToolDetailViewProps) => {
+    const item = catalogItem;
     const [capabilities, setCapabilities] = useState<Capability[] | null>(null);
     const [failed, setFailed] = useState(false);
     const [query, setQuery] = useState('');
     const [reloadKey, setReloadKey] = useState(0);
-    const connected = tool.runtimeConnected;
+    const [replaceOpen, setReplaceOpen] = useState(false);
+    const [replacement, setReplacement] = useState('');
+    const [replacing, setReplacing] = useState(false);
+    const connected = tool.runtimeConnected && tool.status === 'CONNECTED';
 
     useEffect(() => {
         if (!connected) {
@@ -41,6 +47,25 @@ const ToolDetailView = ({tool, busy, onBack, onConnect, onDisconnect, onRemove, 
     }, [tool.id, connected, reloadKey]);
 
     const visible = (capabilities ?? []).filter((c) => `${c.name} ${c.description}`.toLowerCase().includes(query.trim().toLowerCase()));
+
+    const replaceCredential = async () => {
+        if (!replacement.trim()) return;
+        setReplacing(true);
+        try {
+            if (tool.runtimeConnected) await toolsApi.disconnect(tool.id);
+            await toolsApi.replaceBearerCredential(tool.id, replacement.trim());
+            setReplacement('');
+            setReplaceOpen(false);
+            const result = await toolsApi.connect(tool.id);
+            if (result?.initialized) message.success(`${tool.name} credential replaced and MCP connection verified.`);
+            else message.error(`Credential saved, but ${tool.name} MCP connection failed${result?.error ? `: ${result.error}` : '.'}`);
+        } catch (error) {
+            message.error(error instanceof Error ? error.message : 'Could not replace the credential.');
+        } finally {
+            setReplacing(false);
+            onChanged();
+        }
+    };
 
     const capabilitiesTab = !connected ? (
         <p className="empty-note">Connect this tool to discover what it can do.</p>
@@ -71,7 +96,9 @@ const ToolDetailView = ({tool, busy, onBack, onConnect, onDisconnect, onRemove, 
     const details: [string, string][] = [
         ['Endpoint', tool.endpoint],
         ['Transport', tool.transport === 'STREAMABLE_HTTP' ? 'Streamable HTTP' : tool.transport],
-        ['Authentication', tool.authType === 'BEARER' ? 'Bearer token (stored encrypted)' : 'None'],
+        ['Authentication', tool.authType === 'OAUTH'
+            ? (tool.secretConfigured ? `OAuth (${tool.oauthProvider ?? 'provider'}, token stored encrypted)` : 'OAuth, not signed in')
+            : tool.authType === 'BEARER' ? 'Bearer token (stored encrypted)' : 'None'],
     ];
 
     return (
@@ -92,14 +119,17 @@ const ToolDetailView = ({tool, busy, onBack, onConnect, onDisconnect, onRemove, 
                     {connected ? (
                         <Button loading={busy} onClick={onDisconnect}>Disconnect</Button>
                     ) : (
-                        <Button type="primary" loading={busy} onClick={onConnect}>
-                            {tool.status === 'REGISTERED' ? 'Connect' : 'Reconnect'}
+                        <Button type="primary" loading={busy} disabled={tool.status === 'REAUTH_REQUIRED'} onClick={onConnect}>
+                            {tool.status === 'REAUTH_REQUIRED' ? 'Re-authorize first' : tool.status === 'REGISTERED' ? 'Connect' : 'Reconnect'}
                         </Button>
                     )}
                     {onSignIn && (
                         <Button disabled={busy} onClick={onSignIn}>
                             {tool.secretConfigured ? 'Re-authorize' : 'Sign in'}
                         </Button>
+                    )}
+                    {tool.authType === 'BEARER' && (
+                        <Button disabled={busy} onClick={() => setReplaceOpen(true)}>Replace token</Button>
                     )}
                     <Button danger disabled={busy} onClick={onRemove}>Remove</Button>
                 </div>
@@ -128,6 +158,14 @@ const ToolDetailView = ({tool, busy, onBack, onConnect, onDisconnect, onRemove, 
                     },
                 ]}
             />
+            <Modal open={replaceOpen} title="Replace bearer token" okText="Save and reconnect"
+                   confirmLoading={replacing} onOk={() => void replaceCredential()}
+                   onCancel={() => { if (!replacing) { setReplaceOpen(false); setReplacement(''); } }}>
+                <p>The previous token cannot be recovered if its encryption key changed. Enter a new token with the required read-only access. It is encrypted by the backend and is never returned to this page.</p>
+                <Input.Password autoComplete="new-password" value={replacement}
+                                onChange={(event) => setReplacement(event.target.value)}
+                                placeholder="Paste a new access token" aria-label="New bearer token"/>
+            </Modal>
         </div>
     );
 };

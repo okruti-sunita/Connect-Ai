@@ -73,7 +73,8 @@ public class McpRuntimeReconciler {
                 log.info("Reconnected MCP server at startup: serverId={}", id);
             } catch (RuntimeException exception) {
                 // connect() has already stored FAILED and the reason on the server.
-                log.warn("Startup reconnect failed: serverId={}, cause={}", id, exception.getMessage());
+                log.warn("Startup reconnect failed: serverId={}, reason={}", id,
+                        McpConnectionService.describeFailure(exception));
             }
         }
     }

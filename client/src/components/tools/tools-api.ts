@@ -1,7 +1,8 @@
 // Talks to the MCP connection endpoints through the shared HTTP helper (base URL, errors).
 import {apiRequest, ApiError} from '../../api/http';
+import type {CatalogApiEntry, ConnectMethod} from './tool-catalog';
 
-export type ConnectionStatus = 'REGISTERED' | 'CONNECTING' | 'CONNECTED' | 'FAILED' | 'DISCONNECTED';
+export type ConnectionStatus = 'REGISTERED' | 'CONNECTING' | 'CONNECTED' | 'REAUTH_REQUIRED' | 'FAILED' | 'DISCONNECTED';
 
 /** Mirrors com.connectai.mcp.model.McpServer. The secret itself is never returned. */
 export interface McpServerDto {
@@ -23,6 +24,8 @@ export interface McpServerDto {
     secretConfigured: boolean;
     /** OAuth provider id when authType is OAUTH. */
     oauthProvider: string | null;
+    catalogKey: string | null;
+    connectMethod: ConnectMethod | null;
 }
 
 /** Mirrors McpConnectionResponse. */
@@ -46,6 +49,32 @@ export interface RegisterToolPayload {
     enabled: boolean;
     /** Required for OAUTH, e.g. "github". */
     oauthProvider?: string | null;
+    catalogKey?: string | null;
+}
+
+export interface CreateConnectionPayload {
+    catalogKey: string | null;
+    name: string;
+    variant?: string;
+    endpoint: string;
+    method: ConnectMethod;
+    credentials: Record<string, string>;
+}
+
+export interface ConnectionTestDto {
+    success: boolean;
+    steps: {name: string; passed: boolean; code: string; message: string; hint: string | null}[];
+    toolCount: number;
+    toolNames: string[];
+    code: string | null;
+    message: string | null;
+    hint: string | null;
+}
+
+export interface CreatedConnectionDto {
+    connection: McpServerDto;
+    toolCount: number;
+    toolNames: string[];
 }
 
 export interface OAuthProviderDto {
@@ -53,12 +82,21 @@ export interface OAuthProviderDto {
     displayName: string;
     /** False until the server has the provider's OAuth client id and secret. */
     configured: boolean;
+    /** Requested OAuth permissions, safe to display before sign-in. */
+    scopes: string[];
 }
 
 export interface OAuthAttemptDto {
     id: string;
     status: 'PENDING' | 'SUCCEEDED' | 'FAILED';
     message: string;
+}
+
+export interface OAuthStartDto {
+    attemptId: string;
+    authorizationUrl: string;
+    /** Browser origin of the configured backend callback page, used to validate its popup message. */
+    callbackOrigin: string;
 }
 
 export interface Capability {
@@ -89,12 +127,18 @@ function normalizeCapabilities(raw: unknown): Capability[] {
 }
 
 export const toolsApi = {
+    catalog: () => request<CatalogApiEntry[]>('/catalog'),
+    testConnection: (payload: CreateConnectionPayload) => request<ConnectionTestDto>('/connections/test', 'POST', payload),
+    createConnection: (payload: CreateConnectionPayload) => request<CreatedConnectionDto>('/connections', 'POST', payload),
     list: (signal?: AbortSignal) => request<McpServerDto[]>('/tools', 'GET', undefined, signal),
     register: (payload: RegisterToolPayload) => request<McpServerDto>('/tools', 'POST', payload),
+    replaceBearerCredential: (id: string, secret: string) => request<McpServerDto>(
+        `/tools/${id}/credential`, 'PUT', {secret}),
     connect: (id: string) => request<ConnectionStatusDto>(`/tools/${id}/connect`, 'POST'),
     disconnect: (id: string) => request<ConnectionStatusDto>(`/tools/${id}/disconnect`, 'POST'),
     oauthProviders: () => request<OAuthProviderDto[]>('/oauth/providers'),
-    startOAuth: (id: string) => request<{ attemptId: string; authorizationUrl: string }>(`/tools/${id}/oauth/start`, 'POST'),
+    startOAuth: (id: string) => apiRequest<OAuthStartDto>(
+        `/tools/${id}/oauth/start`, 'POST', undefined, undefined, 'include'),
     oauthAttempt: (attemptId: string) => request<OAuthAttemptDto>(`/oauth/attempts/${encodeURIComponent(attemptId)}`),
     /** Deletes the saved connection and its token. The backend answers 409 while it is still connected. */
     remove: (id: string) => request<void>(`/tools/${id}`, 'DELETE'),

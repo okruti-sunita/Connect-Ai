@@ -1,6 +1,8 @@
 package com.connectai.mcp.service;
 
 import com.connectai.mcp.api.dto.RegisterMcpServerRequest;
+import com.connectai.mcp.api.dto.ReplaceMcpCredentialRequest;
+import com.connectai.mcp.catalog.ConnectMethod;
 import com.connectai.mcp.client.McpClientRegistry;
 import com.connectai.mcp.client.McpEndpoint;
 import com.connectai.mcp.model.McpAuthType;
@@ -65,6 +67,10 @@ public class McpToolService implements McpToolOperations {
         if (request.authType() == McpAuthType.OAUTH) {
             entity.useOAuthProvider(request.oauthProvider());
         }
+        entity.setCatalogKey(request.catalogKey());
+        entity.setConnectionAuth(request.authType() == McpAuthType.OAUTH ? ConnectMethod.OAUTH_APP
+                : request.authType() == McpAuthType.BEARER ? ConnectMethod.TOKEN_BEARER : ConnectMethod.NONE,
+                null);
 
         EMcpServer savedEntity = repository.save(entity);
 
@@ -96,6 +102,25 @@ public class McpToolService implements McpToolOperations {
                         HttpStatus.NOT_FOUND,
                         "MCP server " + id + " not found"
                 ));
+    }
+
+    @Override
+    @Transactional
+    public McpServer replaceBearerCredential(UUID id, ReplaceMcpCredentialRequest request) {
+        EMcpServer entity = repository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND,
+                        "MCP server " + id + " not found"));
+        if (entity.getAuthType() != McpAuthType.BEARER) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Only manually configured bearer credentials can be replaced here; use the provider sign-in flow for OAuth.");
+        }
+        if (clientRegistry.isConnected(id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Disconnect this MCP server before replacing its credential.");
+        }
+        entity.replaceBearerCredential(encryptionService.encrypt(request.secret()));
+        EMcpServer saved = repository.save(entity);
+        return McpServer.from(saved, false);
     }
 
     /** Rejects configurations that can never connect, before anything is stored. */

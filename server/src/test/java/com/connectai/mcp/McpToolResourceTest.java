@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -103,6 +104,43 @@ class McpToolResourceTest {
     }
 
     @Test
+    void catalogReturnsValidatedConnectorMetadataAndDerivedConnectionCount() throws Exception {
+        mvc.perform(post("/api/tools")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"GitHub - Main","transport":"STREAMABLE_HTTP",
+                                 "endpoint":"https://api.githubcopilot.com/mcp/","authType":"BEARER",
+                                 "secret":"test-token","enabled":true,"catalogKey":"github"}
+                                """))
+                .andExpect(status().isCreated());
+
+        mvc.perform(get("/api/catalog"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].connector.key").value("github"))
+                .andExpect(jsonPath("$[0].connectionCount").value(1))
+                .andExpect(jsonPath("$[0].status").value("AVAILABLE"))
+                .andExpect(jsonPath("$[0].connector.methods[0].id").value("OAUTH_APP"))
+                .andExpect(jsonPath("$[0].connector.clientSecret").doesNotExist());
+
+        EMcpServer saved = repository.findAll().getFirst();
+        assertEquals("github", saved.getCatalogKey());
+    }
+
+    @Test
+    void connectionTestRejectsUnsupportedCatalogMethodWithoutSavingCredentials() throws Exception {
+        mvc.perform(post("/api/connections/test")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"catalogKey":"github","name":"GitHub test",
+                                 "endpoint":"https://api.githubcopilot.com/mcp/","method":"NONE",
+                                 "credentials":{}}
+                                """))
+                .andExpect(status().isBadRequest());
+
+        assertEquals(0, repository.count());
+    }
+
+    @Test
     void getTool_unknownId_returns404() throws Exception {
 
         mvc.perform(get("/api/tools/00000000-0000-0000-0000-000000000001"))
@@ -148,5 +186,30 @@ class McpToolResourceTest {
                 McpConnectionStatus.REGISTERED,
                 saved.getStatus()
         );
+    }
+
+    @Test
+    void replaceBearerCredential_encryptsNewValueAndNeverReturnsIt() throws Exception {
+        mvc.perform(post("/api/tools")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"GitHub - Main","transport":"STREAMABLE_HTTP",
+                                 "endpoint":"https://api.githubcopilot.com/mcp/","authType":"BEARER",
+                                 "secret":"old-invalid-token","enabled":true}
+                                """))
+                .andExpect(status().isCreated());
+        EMcpServer saved = repository.findAll().getFirst();
+
+        mvc.perform(put("/api/tools/{id}/credential", saved.getId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"secret\":\"replacement-token-value\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.secret").doesNotExist())
+                .andExpect(jsonPath("$.secretConfigured").value(true))
+                .andExpect(jsonPath("$.status").value("DISCONNECTED"));
+
+        EMcpServer updated = repository.findById(saved.getId()).orElseThrow();
+        assertNotNull(updated.getEncryptedSecret());
+        assertEquals("replacement-token-value", encryptionService.decrypt(updated.getEncryptedSecret()));
     }
 }

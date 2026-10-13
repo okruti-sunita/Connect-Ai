@@ -31,7 +31,8 @@ public class McpClientRegistry {
             try {
                 previous.closeGracefully();
             } catch (RuntimeException exception) {
-                log.debug("Ignoring error while closing replaced MCP client: serverId={}, cause={}", serverId, exception.toString());
+                log.debug("Ignoring error while closing replaced MCP client: serverId={}, exceptionType={}",
+                        serverId, exception.getClass().getSimpleName());
             }
         }
     }

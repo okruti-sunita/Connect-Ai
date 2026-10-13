@@ -68,7 +68,8 @@ public class InvestigationRunner {
         MDC.put("investigationId", investigationId.toString());
         long started = System.nanoTime();
         try {
-            List<McpToolCandidate> tools = toolCatalog.getAvailableTools();
+            var catalog = toolCatalog.snapshot();
+            List<McpToolCandidate> tools = catalog.tools();
             log.info("Investigation run started: id={}, availableTools={}", investigationId, tools.size());
             Map<UUID, String> connections = serverNames(tools);
 
@@ -126,11 +127,9 @@ public class InvestigationRunner {
             if (!uncovered.isEmpty()) {
                 log.info("Question asks for data no connected tool provides: {}", uncovered);
             }
-            GroundedAnswer answer = answerGenerator.generate(execution, new AnswerHints(uncovered, connections));
+            GroundedAnswer answer = answerGenerator.generate(
+                    execution, new AnswerHints(uncovered, connections, catalog.warnings()));
             store.complete(investigationId, execution, answer, connections, "AI_AGENT", routeDetail);
-            if (learned != null) {
-                learned.learn(investigationId, question, execution, InvestigationStore.statusFor(execution, answer), tools);
-            }
 
             log.info("Investigation run finished: id={}, executionStatus={}, grounded={}, fallbackUsed={}, elapsedMs={}",
                     investigationId, execution.status(), answer.grounded(), answer.fallbackUsed(),

@@ -486,4 +486,16 @@
         </createTable>
     </changeSet>
 
+    <changeSet id="013-mcp-catalog-key" author="connect-ai">
+        <addColumn tableName="mcp_server">
+            <column name="catalog_key" type="varchar(100)"/>
+            <column name="connect_method" type="varchar(30)"/>
+            <column name="encrypted_auth_config" type="varchar(12000)"/>
+        </addColumn>
+        <sql>UPDATE mcp_server SET connect_method = CASE auth_type WHEN 'OAUTH' THEN 'OAUTH_APP' WHEN 'BEARER' THEN 'TOKEN_BEARER' ELSE 'NONE' END WHERE connect_method IS NULL</sql>
+        <createIndex tableName="mcp_server" indexName="idx_mcp_server_catalog_key">
+            <column name="catalog_key"/>
+        </createIndex>
+    </changeSet>
+
 </databaseChangeLog>

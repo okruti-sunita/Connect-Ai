@@ -39,6 +39,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Slf4j
 public class McpToolExecutionService {
+    private static final int MAX_TOOL_PAGES = 100;
 
     private final McpServerRepository repository;
     private final McpClientRegistry clientRegistry;
@@ -118,7 +119,7 @@ public class McpToolExecutionService {
             String detail = McpConnectionService.describeFailure(exception);
             log.warn("MCP tool execution failed: serverId={}, toolName={}, elapsedMs={}, cause={}",
                     serverId, toolName, elapsedMs(started), detail);
-            log.debug("MCP tool execution failure detail", exception);
+            log.debug("MCP tool execution failure type: exceptionType={}", exception.getClass().getSimpleName());
             throw new ResponseStatusException(
                     HttpStatus.BAD_GATEWAY,
                     "MCP tool '" + toolName + "' failed: " + detail,
@@ -150,8 +151,12 @@ public class McpToolExecutionService {
         Set<String> seenCursors = new HashSet<>();
 
         McpSchema.ListToolsResult result = client.listTools();
+        int pages = 0;
 
         while (result != null) {
+            if (++pages > MAX_TOOL_PAGES) {
+                throw new IllegalStateException("MCP tool execution exceeded the maximum page count");
+            }
             if (result.tools() != null) {
                 tools.addAll(result.tools());
             }

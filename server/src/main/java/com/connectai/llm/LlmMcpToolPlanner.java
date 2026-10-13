@@ -65,10 +65,15 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
             - The action must be one of the candidate ids (T1, T2, ...) or FINISH.
             - arguments must be a JSON object containing only that tool's listed parameters,
               with every required parameter filled in. Use {} for tools without parameters.
-            - Only choose a tool whose output directly contains the data the question asks for.
+            - Only choose a tool whose output directly contains data for at least one part of the question.
               A tool that returns a related but different thing (for example open issues
               instead of CI failures, or a public keyword search instead of the user's own
-              data) does not help: choose FINISH and name the missing capability in the reason.
+              data) does not help. For a multi-part question, gather evidence for the parts
+              available tools can answer; do not choose FINISH only because another part is unsupported.
+            - If a successful tool result reports more pages, a next cursor or has_more=true, continue with
+              the same tool and its schema-defined pagination argument until the result says there are no
+              more pages or the step budget prevents it. Do not treat one page as a complete total.
+            - For a requested date range, apply the range using the available tool parameters or query syntax.
             - If the question is about the user's own resources ("my", "I") and the user's
               identity is not known yet, a tool that returns the authenticated user comes first.
             - Choose FINISH when previous steps already returned enough evidence to answer,
@@ -171,7 +176,10 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
 
         // Deterministic fan-out for "each/all/both connections" questions: small models stop after the
         // first connection, so an argument-free call that succeeded is repeated on the others.
-        java.util.Optional<PlannerDecision> identity = identityFirst(question, eligible, current);
+        // Identity tools are needed to scope first-person data requests, but topic filtering
+        // commonly removes get_me because its short name does not match a topic such as commits.
+        // It is safe to select only the argument-free identity tool from the discovered catalog.
+        java.util.Optional<PlannerDecision> identity = identityFirst(question, availableTools, current);
         if (identity.isPresent()) {
             log.info("MCP planner: identity call first for a first-person question: {}", identity.get().plan().toolName());
             return identity.get();
@@ -207,7 +215,7 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
         if (!coverage.uncoveredCapabilities().isEmpty()) {
             basePrompt += "\n\nNote: no connected tool provides data about: "
                     + String.join(", ", coverage.uncoveredCapabilities())
-                    + ". If the question cannot be answered without it, choose FINISH and say so.";
+                    + ". Continue gathering evidence for any other answerable parts; the final answer will disclose this gap.";
         }
         ToolSpec decisionSpec = decisionTool(byShortId.keySet());
 

@@ -44,6 +44,13 @@ public class McpToolResource {
         return ResponseEntity.ok(mcpToolOperations.getTools());
     }
 
+    @PutMapping("/{id}/credential")
+    public ResponseEntity<McpServer> replaceBearerCredential(
+            @PathVariable UUID id,
+            @Valid @RequestBody ReplaceMcpCredentialRequest request) {
+        return ResponseEntity.ok(mcpToolOperations.replaceBearerCredential(id, request));
+    }
+
     @PostMapping("/{id}/connect")
     public ResponseEntity<McpConnectionResponse> connect(
             @PathVariable String id) {

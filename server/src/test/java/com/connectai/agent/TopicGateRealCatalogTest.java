@@ -113,6 +113,16 @@ class TopicGateRealCatalogTest {
     }
 
     @Test
+    void singularRepositoryQuestionKeepsThePluralNamedRepositorySearchTool() {
+        String q = "Find repository torvalds/linux and report its language and default branch.";
+        var coverage = ToolShortlister.topicCoverage(q, readOnlyCatalog);
+
+        assertThat(coverage.noToolCoversTheTopic()).isFalse();
+        assertThat(ToolShortlister.withNameMatches(q, coverage.covering(), readOnlyCatalog))
+                .extracting(McpToolCandidate::toolName).contains("search_repositories");
+    }
+
+    @Test
     void typoOfAGenericWordIsIgnored() {
         assertThat(ToolShortlister.topicCoverage("guthub repos", readOnlyCatalog).topics()).isEmpty();
     }

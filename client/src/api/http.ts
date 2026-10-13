@@ -49,12 +49,14 @@ async function errorMessage(response: Response): Promise<string> {
     return fallbackMessage(response.status);
 }
 
-export async function apiRequest<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
+export async function apiRequest<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal,
+                                   credentials?: RequestCredentials): Promise<T> {
     let response: Response;
     try {
         const init: RequestInit = {
             method,
             signal,
+            credentials,
             headers: {Accept: 'application/json', ...(body !== undefined ? {'Content-Type': 'application/json'} : {})},
         };
         if (body !== undefined) init.body = JSON.stringify(body);
