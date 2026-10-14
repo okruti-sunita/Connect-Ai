@@ -58,6 +58,13 @@ class McpClientFactoryAuthenticationIntegrationTest {
         assertHeaders(ConnectMethod.TOKEN_HEADERS,
                 Map.of("header:X-Api-Key", "api-test", "header:X-App-Key", "app-test"),
                 Map.of("x-api-key", "api-test", "x-app-key", "app-test"));
+        assertHeaders(ConnectMethod.TOKEN_HEADERS,
+                Map.of("header:X-Grafana-URL", "https://grafana.example.test",
+                        "header:X-Grafana-Service-Account-Token", "grafana-service-test",
+                        "header:Authorization", "Bearer mcp-endpoint-test"),
+                Map.of("x-grafana-url", "https://grafana.example.test",
+                        "x-grafana-service-account-token", "grafana-service-test",
+                        "authorization", "Bearer mcp-endpoint-test"));
         assertHeaders(ConnectMethod.NONE, Map.of(), Map.of());
     }
 

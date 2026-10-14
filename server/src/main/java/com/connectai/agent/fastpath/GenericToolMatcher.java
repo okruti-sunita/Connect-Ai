@@ -165,6 +165,7 @@ public final class GenericToolMatcher {
         Map<String, String> sources = new LinkedHashMap<>();
         String loginParameter = null;
         boolean loginIsId = false;
+        boolean scopedToCurrentUser = false;
         boolean usedState = false;
 
         for (Map.Entry<String, Object> property : properties.entrySet()) {
@@ -193,9 +194,14 @@ public final class GenericToolMatcher {
             } else if (LIMIT_PARAMS.contains(normalized)) {
                 value = q.limit() != null ? (Object) (long) q.limit() : isRequired ? 20L : null;
             } else if (USER_PARAMS.contains(normalized) && q.firstPerson() && loginParameter == null) {
-                loginParameter = name;
-                loginIsId = normalized.endsWith("id");
-                continue; // filled with the user's login after the identity call
+                if (supportsCurrentUserAlias(schema)) {
+                    value = "me";
+                    scopedToCurrentUser = true;
+                } else {
+                    loginParameter = name;
+                    loginIsId = normalized.endsWith("id");
+                    continue; // filled with the user's login after the identity call
+                }
             }
 
             if (value != null) {
@@ -205,7 +211,8 @@ public final class GenericToolMatcher {
                 return Optional.empty();
             }
             if (value != null) {
-                sources.put(name, source(normalized));
+                sources.put(name, scopedToCurrentUser && USER_PARAMS.contains(normalized)
+                        ? "documented current-user alias in the tool schema" : source(normalized));
             }
         }
 
@@ -214,7 +221,7 @@ public final class GenericToolMatcher {
             return Optional.empty();
         }
         if (q.kind() == GenericQuery.Kind.GET && q.itemKey() == null && q.itemNumber() == null) return Optional.empty();
-        if (q.firstPerson() && loginParameter == null && !personal(tool)) { // "my ..." but nothing scopes the call
+        if (q.firstPerson() && loginParameter == null && !scopedToCurrentUser && !personal(tool)) { // "my ..." but nothing scopes the call
             rejections.add("\"My\" cannot be scoped to your account with " + tool.toolName() + " (no user parameter).");
             return Optional.empty();
         }
@@ -242,6 +249,11 @@ public final class GenericToolMatcher {
         String text = (tool.toolName() + " " + tool.description()).toLowerCase(Locale.ROOT);
         return text.matches(".*\\b(my|mine)\\b.*") || text.contains("authenticated user") || text.contains("current user")
                 || text.contains("assigned to you") || text.contains("for the user");
+    }
+
+    private static boolean supportsCurrentUserAlias(Map<String, Object> schema) {
+        String description = String.valueOf(schema.getOrDefault("description", "")).toLowerCase(Locale.ROOT);
+        return description.contains("\"me\"") || description.contains("'me'") || description.contains("`me`");
     }
 
     private static Optional<Object> enumValue(Map<String, Object> schema, String wanted) {

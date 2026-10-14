@@ -19,6 +19,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.nio.charset.StandardCharsets;
+import java.net.http.HttpClient;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -78,7 +79,10 @@ public class McpClientFactory {
                 HttpClientStreamableHttpTransport
                         .builder(endpoint.baseUrl())
                         .endpoint(endpoint.path())
-                        .connectTimeout(connectTimeout);
+                        .connectTimeout(connectTimeout)
+                        // Never follow a server-controlled redirect from a user-supplied MCP
+                        // endpoint. It could redirect an otherwise public URL to a private host.
+                        .customizeClient(clientBuilder -> clientBuilder.followRedirects(HttpClient.Redirect.NEVER));
 
         ConnectMethod method = server.getConnectMethod();
         if (method == null) {

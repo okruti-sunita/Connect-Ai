@@ -51,6 +51,13 @@ public class McpToolResource {
         return ResponseEntity.ok(mcpToolOperations.replaceBearerCredential(id, request));
     }
 
+    @PutMapping("/{id}/grafana-credentials")
+    public ResponseEntity<McpServer> replaceGrafanaCredentials(
+            @PathVariable UUID id,
+            @Valid @RequestBody ReplaceGrafanaCredentialsRequest request) {
+        return ResponseEntity.ok(mcpToolOperations.replaceGrafanaCredentials(id, request));
+    }
+
     @PostMapping("/{id}/connect")
     public ResponseEntity<McpConnectionResponse> connect(
             @PathVariable String id) {

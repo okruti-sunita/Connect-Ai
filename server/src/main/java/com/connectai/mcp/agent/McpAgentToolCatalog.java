@@ -113,7 +113,9 @@ public class McpAgentToolCatalog implements AgentToolCatalog {
                         Map<String, Object> schema = tool.inputSchema() == null ? Map.of() : tool.inputSchema();
                         Boolean readOnly = tool.annotations() == null ? null : tool.annotations().readOnlyHint();
                         McpToolCandidate candidate = new McpToolCandidate(
-                                serverId, tool.name(), tool.title(), tool.description(), schema, readOnly, server.getName());
+                                serverId, tool.name(), tool.title(), tool.description(), schema, readOnly, server.getName(),
+                                server.getCatalogKey() == null || server.getCatalogKey().isBlank()
+                                        ? server.getOauthProvider() : server.getCatalogKey());
                         // Investigations gather evidence; tools that change data are not offered.
                         if (!allowWriteTools && !ToolSafetyPolicy.isReadOnly(candidate)) {
                             excludedWrites.add(tool.name());

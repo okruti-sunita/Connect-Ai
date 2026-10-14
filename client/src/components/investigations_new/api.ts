@@ -57,6 +57,7 @@ interface ApiEvidence {
     toolName: string | null;
     serverId: string | null;
     serverName: string | null;
+    completeness?: "COMPLETE" | "PARTIAL" | "TRUNCATED" | "EMPTY" | "UNKNOWN" | null;
 }
 
 interface ApiStep {
@@ -73,6 +74,7 @@ interface ApiStep {
 
 interface ApiInvestigation {
     id: string;
+    traceId: string;
     title: string;
     question: string;
     status: ApiStatus;
@@ -167,7 +169,8 @@ const toEvidence = (e: ApiEvidence): EvidenceItem => {
         when: timeAgo(e.fetchedAt),
         toolName: e.toolName,
         serverName: e.serverId ? e.serverName ?? "removed connection" : null,
-        stepNumber: e.stepNumber
+        stepNumber: e.stepNumber,
+        completeness: e.completeness ?? "UNKNOWN"
     };
 };
 
@@ -241,6 +244,7 @@ export const getInvestigation = async (id: string): Promise<InvestigationDetailD
 
     return {
         id: res.id,
+        traceId: res.traceId,
         title: res.title,
         question: res.question,
         status: toStatus(res.status, res.archived),

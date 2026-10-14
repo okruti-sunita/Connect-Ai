@@ -2,6 +2,7 @@ package com.connectai.llm;
 
 import com.connectai.agent.McpToolCandidate;
 import com.connectai.agent.ToolSelectionPlan;
+import com.connectai.agent.ToolSemanticRetriever;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
@@ -62,6 +63,86 @@ class LlmMcpToolPlannerTest {
     }
 
     @Test
+    void acceptedStrongSemanticCandidateCanPassTheLexicalTopicGateAndRemainsBoundToLiveCatalog() {
+        UUID serverId = UUID.randomUUID();
+        McpToolCandidate satisfaction = new McpToolCandidate(serverId, "query_satisfaction", "Feedback rollup",
+                "Aggregate customer feedback scores", Map.of("type", "object"));
+        ToolSemanticRetriever semantic = (question, live, limit) -> List.of(satisfaction);
+        LlmClient llm = new StubLlmClient("""
+                {"action":"T1","arguments":{},"reason":"The aggregate feedback tool best matches the request."}
+                """);
+
+        ToolSelectionPlan selected = new LlmMcpToolPlanner(llm, 6, 3, semantic)
+                .plan("What caused the latest production incidents?", List.of(satisfaction)).orElseThrow();
+
+        assertThat(selected.serverId()).isEqualTo(serverId);
+        assertThat(selected.toolName()).isEqualTo("query_satisfaction");
+    }
+
+    @Test
+    void weakSemanticNearestNeighborCannotBypassTopicGateOrCallTheModel() {
+        McpToolCandidate unrelated = new McpToolCandidate(UUID.randomUUID(), "query_satisfaction", "Feedback rollup",
+                "Aggregate customer feedback scores", Map.of("type", "object"));
+        ToolSemanticRetriever semantic = (question, live, limit) -> List.of(); // PgVector filters weak matches.
+        RecordingLlmClient llm = new RecordingLlmClient();
+
+        var decision = new LlmMcpToolPlanner(llm, 6, 1, semantic)
+                .decide("What caused the latest production incidents?", List.of(unrelated), null);
+
+        assertThat(decision.isFinish()).isTrue();
+        assertThat(llm.called).isFalse();
+    }
+
+    @Test
+    void emptySemanticResultsLeaveLexicalFallbackAvailable() {
+        McpToolCandidate incidentSearch = new McpToolCandidate(UUID.randomUUID(), "search_incidents", "Incidents",
+                "Search production incident records", Map.of("type", "object"));
+        ToolSemanticRetriever semantic = (question, live, limit) -> List.of();
+        LlmClient llm = new StubLlmClient(
+                "{\"action\":\"T1\",\"arguments\":{},\"reason\":\"Lexical match.\"}");
+
+        ToolSelectionPlan plan = new LlmMcpToolPlanner(llm, 6, 1, semantic)
+                .plan("Summarize the production incidents", List.of(incidentSearch)).orElseThrow();
+
+        assertThat(plan.toolName()).isEqualTo("search_incidents");
+    }
+
+    @Test
+    void semanticCandidateKeepsASlotWhenLexicalShortlistIsAlreadyFull() {
+        List<McpToolCandidate> lexical = java.util.stream.IntStream.range(0, 6)
+                .mapToObj(index -> new McpToolCandidate(UUID.randomUUID(), "search_incidents_" + index,
+                        "Search incidents", "Search production incident records", Map.of("type", "object")))
+                .toList();
+        McpToolCandidate semanticCandidate = new McpToolCandidate(UUID.randomUUID(), "query_feedback_rollup",
+                "Feedback rollup", "Aggregate customer satisfaction signals", Map.of("type", "object"));
+        ToolSemanticRetriever semantic = (question, live, limit) -> List.of(semanticCandidate);
+        LlmClient llm = new StubLlmClient("""
+                {"action":"T6","arguments":{},"reason":"The aggregate tool is semantically relevant."}
+                """);
+
+        ToolSelectionPlan selected = new LlmMcpToolPlanner(llm, 6, 3, semantic)
+                .plan("Summarize production incidents and customer satisfaction", append(lexical, semanticCandidate))
+                .orElseThrow();
+
+        assertThat(selected.serverId()).isEqualTo(semanticCandidate.serverId());
+        assertThat(selected.toolName()).isEqualTo("query_feedback_rollup");
+    }
+
+    @Test
+    void semanticRetrieverCannotInjectToolOutsideTheCurrentLiveCatalog() {
+        McpToolCandidate connected = candidate(UUID.randomUUID(), "search_issues");
+        McpToolCandidate stale = candidate(UUID.randomUUID(), "query_sensitive_data");
+        RecordingLlmClient llm = new RecordingLlmClient();
+        ToolSemanticRetriever semantic = (question, live, limit) -> List.of(stale);
+
+        var decision = new LlmMcpToolPlanner(llm, 6, 1, semantic)
+                .decide("Summarize incidents from last night", List.of(connected), null);
+
+        assertThat(decision.isFinish()).isTrue();
+        assertThat(llm.called).isFalse();
+    }
+
+    @Test
     void finishReturnsEmpty() {
         LlmClient llm = new StubLlmClient("""
                 {
@@ -94,8 +175,8 @@ class LlmMcpToolPlannerTest {
                         .plan(
                                 "Find something",
                                 List.of(candidate("search"))))
-                .isInstanceOf(LlmException.class)
-                .hasMessageContaining("is not a candidate");
+                .isInstanceOf(com.connectai.agent.PlannerFailureException.class)
+                .hasMessageContaining("after bounded retries");
     }
 
     @Test
@@ -202,9 +283,8 @@ class LlmMcpToolPlannerTest {
                         .plan(
                                 "Find something",
                                 List.of(candidate)))
-                .isInstanceOf(LlmException.class)
-                .hasMessageContaining(
-                        "invalid arguments");
+                .isInstanceOf(com.connectai.agent.PlannerFailureException.class)
+                .hasMessageContaining("after bounded retries");
     }
     @Test
     void nullToolInsideCatalogIsRejected() {
@@ -249,9 +329,8 @@ class LlmMcpToolPlannerTest {
                         .plan(
                                 "Find something",
                                 List.of(candidate("search"))))
-                .isInstanceOf(LlmException.class)
-                .hasMessageContaining(
-                        "invalid MCP planning decision");
+                .isInstanceOf(com.connectai.agent.PlannerFailureException.class)
+                .hasMessageContaining("after bounded retries");
     }
 
     @Test
@@ -264,9 +343,8 @@ class LlmMcpToolPlannerTest {
                         .plan(
                                 "Find something",
                                 List.of(candidate("search"))))
-                .isInstanceOf(LlmException.class)
-                .hasMessageContaining(
-                        "invalid MCP planning decision");
+                .isInstanceOf(com.connectai.agent.PlannerFailureException.class)
+                .hasMessageContaining("after bounded retries");
     }
 
     @Test
@@ -375,6 +453,12 @@ class LlmMcpToolPlannerTest {
         return candidate(
                 UUID.randomUUID(),
                 toolName);
+    }
+
+    private static List<McpToolCandidate> append(List<McpToolCandidate> tools, McpToolCandidate extra) {
+        java.util.ArrayList<McpToolCandidate> result = new java.util.ArrayList<>(tools);
+        result.add(extra);
+        return List.copyOf(result);
     }
 
     private static McpToolCandidate candidate(

@@ -73,7 +73,7 @@ class ToolArgumentValidatorTest {
     }
 
     @Test
-    void dropsNullOptionalAndUndeclaredParameters() {
+    void dropsNullOptionalAndRejectsUndeclaredParameters() {
         Map<String, Object> args = new HashMap<>();
         args.put("owner", "o");
         args.put("repo", "r");
@@ -82,7 +82,8 @@ class ToolArgumentValidatorTest {
 
         var result = ToolArgumentValidator.validate(ISSUE_SCHEMA, args);
 
-        assertThat(result.valid()).isTrue();
+        assertThat(result.valid()).isFalse();
+        assertThat(result.errors()).containsExactly("arguments.hallucinated is not a parameter of this tool");
         assertThat(result.arguments()).containsOnlyKeys("owner", "repo");
     }
 

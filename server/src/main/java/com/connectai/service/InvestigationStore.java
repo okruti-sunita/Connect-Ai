@@ -143,6 +143,11 @@ public class InvestigationStore {
      */
     static InvestigationStatus statusFor(AgentExecutionState execution, GroundedAnswer answer) {
         boolean grounded = answer.grounded() && !answer.evidence().isEmpty();
+        // A later planner failure does not invalidate successful executions. Even if their
+        // evidence is irrelevant or insufficient to ground an answer, keep the run partial.
+        if (execution.hasSuccessfulStep() && execution.status() != AgentExecutionStatus.COMPLETED) {
+            return InvestigationStatus.PARTIAL;
+        }
         if (grounded && answer.coverage() != GroundedAnswer.Coverage.NONE) {
             // Only a verified model answer that claims full coverage of a completed run is ANSWERED.
             return answer.coverage() == GroundedAnswer.Coverage.FULL
@@ -167,7 +172,8 @@ public class InvestigationStore {
                 summary,
                 evidence.stepNumber(),
                 evidence.toolName(),
-                evidence.serverId());
+                evidence.serverId(),
+                evidence.completeness());
     }
 
     /** Classifies evidence by the owning server's name and the tool name, e.g. "GitHub - Main get_me". */

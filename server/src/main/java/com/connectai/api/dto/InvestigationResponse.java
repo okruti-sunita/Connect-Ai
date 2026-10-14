@@ -17,6 +17,8 @@ import java.util.UUID;
  */
 public record InvestigationResponse(
         UUID id,
+        /** Correlation key used by the backend's structured investigation lifecycle events. */
+        UUID traceId,
         String title,
         String question,
         InvestigationStatus status,
@@ -69,6 +71,7 @@ public record InvestigationResponse(
                 .toList();
 
         return new InvestigationResponse(
+                i.getId(),
                 i.getId(),
                 i.getTitle(),
                 i.getQuestion(),

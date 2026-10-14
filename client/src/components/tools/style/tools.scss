@@ -241,6 +241,7 @@ $bad: #b91c1c;
     display: flex;
     flex-direction: column;
     gap: 10px;
+    min-height: 210px;
 
     .catalog-top {
       display: flex;
@@ -263,11 +264,16 @@ $bad: #b91c1c;
     }
 
     p.catalog-state {
-      min-height: 18px;
+      min-height: 36px;
       flex: 0 0 auto;
       color: #64748b;
       font-size: 12px;
       line-height: 1.5;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      overflow: hidden;
+      overflow-wrap: anywhere;
 
       &.admin-setup {
         color: #9a3412;
@@ -278,8 +284,30 @@ $bad: #b91c1c;
       display: flex;
       justify-content: flex-start;
       align-items: center;
-      gap: 12px;
+      flex-wrap: wrap;
+      gap: 8px;
       margin-top: auto;
+
+      .pill {
+        max-width: 100%;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+
+      .catalog-availability {
+        background: #eaf7ed;
+        color: #287443;
+
+        &.admin {
+          background: #fff3e8;
+          color: #9a3412;
+        }
+
+        &.bad {
+          background: #fee2e2;
+          color: $bad;
+        }
+      }
 
       .link-btn {
         margin-left: auto;

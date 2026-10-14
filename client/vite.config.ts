@@ -9,6 +9,10 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     server: {
+      // When testing OAuth through an HTTPS tunnel, allow only that exact public host.
+      // The browser must use the same hostname for the app and OAuth callback so the
+      // callback-binding cookie remains available to the backend.
+      allowedHosts: env.VITE_DEV_ALLOWED_HOST ? [env.VITE_DEV_ALLOWED_HOST] : undefined,
       proxy: {
         '/connect-ai': {
           target: env.VITE_BACKEND_URL || 'http://localhost:8080',

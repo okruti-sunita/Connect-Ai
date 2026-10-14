@@ -69,6 +69,60 @@ class OAuthServiceTest {
                 .isInstanceOf(ResponseStatusException.class);
     }
 
+    @Test
+    void providerMetadataDoesNotAdvertiseMalformedOAuthEndpointsAsConfigured() {
+        OAuthProperties properties = new OAuthProperties();
+        OAuthProperties.Provider provider = new OAuthProperties.Provider();
+        provider.setAuthorizeUrl("http://provider.example/authorize");
+        provider.setTokenUrl("https://provider.example/token");
+        provider.setClientId("configured-client-id");
+        provider.setClientSecret("configured-client-secret");
+        properties.getProviders().put("invalid", provider);
+        OAuthService service = new OAuthService(properties, mock(McpServerRepository.class),
+                new SecretEncryptionService("test-only-encryption-key-long-enough-123456"), new ObjectMapper());
+
+        OAuthService.ProviderInfo info = service.providers().getFirst();
+
+        assertThat(info.configured()).isFalse();
+        assertThat(info.configurationIssue()).contains("Use HTTPS").doesNotContain("configured-client-secret");
+    }
+
+    @Test
+    void grafanaOAuthRequiresTheRegisteredClientScopes() {
+        OAuthProperties properties = new OAuthProperties();
+        OAuthProperties.Provider provider = new OAuthProperties.Provider();
+        provider.setAuthorizeUrl("https://grafana.example/authorize");
+        provider.setTokenUrl("https://grafana.example/token");
+        provider.setClientId("configured-client-id");
+        provider.setClientSecret("configured-client-secret");
+        properties.getProviders().put("grafana", provider);
+        OAuthService service = new OAuthService(properties, mock(McpServerRepository.class),
+                new SecretEncryptionService("test-only-encryption-key-long-enough-123456"), new ObjectMapper());
+
+        OAuthService.ProviderInfo info = service.providers().getFirst();
+
+        assertThat(info.configured()).isFalse();
+        assertThat(info.configurationIssue()).contains("Grafana OAuth scopes are not configured", "GRAFANA_OAUTH_SCOPES")
+                .doesNotContain("configured-client-secret");
+    }
+
+    @Test
+    void grafanaConfigurationErrorNamesMissingSettingsWithoutExposingValues() {
+        OAuthProperties properties = new OAuthProperties();
+        OAuthProperties.Provider provider = new OAuthProperties.Provider();
+        provider.setAuthorizeUrl("https://grafana.example/authorize");
+        provider.setClientId("configured-client-id");
+        provider.setClientSecret("configured-client-secret");
+        properties.getProviders().put("grafana", provider);
+        OAuthService service = new OAuthService(properties, mock(McpServerRepository.class),
+                new SecretEncryptionService("test-only-encryption-key-long-enough-123456"), new ObjectMapper());
+
+        assertThatThrownBy(() -> service.requireConfigured("grafana"))
+                .isInstanceOf(ResponseStatusException.class)
+                .hasMessageContaining("GRAFANA_OAUTH_TOKEN_URL")
+                .satisfies(exception -> assertThat(exception.getMessage()).doesNotContain("configured-client-secret"));
+    }
+
     private static String state(String authorizationUrl) {
         return java.net.URI.create(authorizationUrl).getRawQuery().lines()
                 .flatMap(query -> java.util.Arrays.stream(query.split("&")))

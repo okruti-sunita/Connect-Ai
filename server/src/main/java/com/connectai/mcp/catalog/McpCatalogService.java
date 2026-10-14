@@ -49,10 +49,18 @@ public class McpCatalogService {
                     .filter(server -> belongsTo(server, key, definition.path("name").asText()))
                     .toList();
             boolean providerReady = true;
+            String providerIssue = null;
+            String providerRedirectUri = null;
             String providerId = definition.path("oauthProvider").asText("");
             if (!providerId.isBlank()) {
-                providerReady = oauth.providers().stream().anyMatch(provider ->
-                        provider.id().equals(providerId) && provider.configured());
+                OAuthService.ProviderInfo providerInfo = oauth.providers().stream()
+                        .filter(provider -> provider.id().equals(providerId)).findFirst().orElse(null);
+                providerReady = providerInfo != null && providerInfo.configured();
+                providerRedirectUri = providerInfo == null ? null : providerInfo.redirectUri();
+                // A catalog provider missing from OAuth configuration follows the declared
+                // requiredServerSettings guidance below. A configured-but-invalid provider has
+                // a precise validation reason from OAuthService.
+                providerIssue = providerInfo == null ? null : providerInfo.configurationIssue();
             }
             for (JsonNode method : definition.path("methods")) {
                 if ("OAUTH_APP".equals(method.path("id").asText()) && !providerReady) {
@@ -60,7 +68,7 @@ public class McpCatalogService {
                 }
             }
             String status = deriveStatus(definition, associated);
-            String statusReason = deriveStatusReason(definition, associated, providerReady);
+            String statusReason = deriveStatusReason(definition, associated, providerReady, providerIssue, providerRedirectUri);
             boolean adminSetupRequired = !providerReady && definition.hasNonNull("requiredServerSettings")
                     && !hasSupportedNonOAuthMethod(definition);
             result.add(new CatalogItemView(definition, associated.size(), status,
@@ -91,7 +99,8 @@ public class McpCatalogService {
         return "AVAILABLE";
     }
 
-    private String deriveStatusReason(JsonNode definition, List<EMcpServer> associated, boolean providerReady) {
+    private String deriveStatusReason(JsonNode definition, List<EMcpServer> associated, boolean providerReady,
+                                      String providerIssue, String providerRedirectUri) {
         if (associated.stream().anyMatch(server -> clients.isConnected(server.getId()))) {
             return "A live MCP session is connected and tools were discovered.";
         }
@@ -108,9 +117,26 @@ public class McpCatalogService {
         if (!providerReady && definition.hasNonNull("requiredServerSettings")) {
             List<String> settings = new ArrayList<>();
             for (JsonNode setting : definition.path("requiredServerSettings")) settings.add(setting.asText());
+            // Provider-specific callback/redirect failures need their specialized guidance.
+            // Missing OAuth client settings are handled below so a supported PAT/header
+            // method remains available and is reported separately from OAuth readiness.
+            if (providerIssue != null
+                    && !providerIssue.startsWith("OAuth sign-in is missing server settings:")) {
+                String action = settings.contains("SLACK_OAUTH_REDIRECT_URI")
+                        ? " Set SLACK_OAUTH_REDIRECT_URI to an HTTPS URL ending in /connect-ai/api/oauth/callback and register that exact URL in the Slack app."
+                        : " A server administrator must correct the OAuth configuration before provider sign-in can be used.";
+                return providerIssue + action;
+            }
+            String callbackGuidance;
+            if (providerRedirectUri != null && !providerRedirectUri.isBlank()) {
+                callbackGuidance = " Register this callback URI with the provider: " + providerRedirectUri + ".";
+            } else if (settings.contains("SLACK_OAUTH_REDIRECT_URI")) {
+                callbackGuidance = " Set SLACK_OAUTH_REDIRECT_URI to the deployment's HTTPS /connect-ai/api/oauth/callback URL and register that same URL in Slack; Slack does not accept the local HTTP callback.";
+            } else {
+                callbackGuidance = " Register the backend's configured callback URI with the provider: " + oauth.redirectUri() + ".";
+            }
             String setup = "A server administrator must configure " + String.join(", ", settings)
-                    + " before provider sign-in can be used. Register this callback URI with the provider: "
-                    + oauth.redirectUri() + ".";
+                    + " before provider sign-in can be used." + callbackGuidance;
             if (!anySupported) return setup;
             String supported = "Ready to connect using " + firstSupportedLabel(definition) + ". ";
             return supported + "To enable provider sign-in, " + setup.substring(0, 1).toLowerCase()

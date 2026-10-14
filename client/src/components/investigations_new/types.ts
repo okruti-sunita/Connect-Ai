@@ -66,6 +66,7 @@ export interface EvidenceItem {
     toolName?: string | null;
     serverName?: string | null;
     stepNumber?: number | null;
+    completeness?: "COMPLETE" | "PARTIAL" | "TRUNCATED" | "EMPTY" | "UNKNOWN";
     url?: string;
     detail?: EvidenceDetail;
 }
@@ -78,6 +79,7 @@ export interface AnalysisSummary {
 
 export interface InvestigationDetailData {
     id: string;
+    traceId: string;
     title: string;
     question: string;
     status: InvestigationStatus;

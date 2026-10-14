@@ -44,6 +44,13 @@ public class OAuthProperties {
         private String clientId;
         private String clientSecret;
         private String scopes = "";
+        /** Optional provider-specific callback; used by providers that impose stricter URI rules. */
+        private String redirectUri;
+        private boolean requireHttpsRedirect;
+        /** Some providers return a non-standard token_type while still issuing a Bearer MCP token. */
+        private String expectedTokenType;
+        /** OAuth resource indicator for providers such as remote MCP authorization servers. */
+        private String resource;
         private String accessType;
         private String clientAuthentication = "client_secret_post";
         private String revocationUrl;
@@ -71,6 +78,14 @@ public class OAuthProperties {
         public void setClientSecret(String clientSecret) { this.clientSecret = clientSecret; }
         public String getScopes() { return scopes; }
         public void setScopes(String scopes) { this.scopes = scopes; }
+        public String getRedirectUri() { return redirectUri; }
+        public void setRedirectUri(String redirectUri) { this.redirectUri = redirectUri; }
+        public boolean isRequireHttpsRedirect() { return requireHttpsRedirect; }
+        public void setRequireHttpsRedirect(boolean requireHttpsRedirect) { this.requireHttpsRedirect = requireHttpsRedirect; }
+        public String getExpectedTokenType() { return expectedTokenType; }
+        public void setExpectedTokenType(String expectedTokenType) { this.expectedTokenType = expectedTokenType; }
+        public String getResource() { return resource; }
+        public void setResource(String resource) { this.resource = resource; }
         public String getAccessType() { return accessType; }
         public void setAccessType(String accessType) { this.accessType = accessType; }
         public String getClientAuthentication() { return clientAuthentication; }

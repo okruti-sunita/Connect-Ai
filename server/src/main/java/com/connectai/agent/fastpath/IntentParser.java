@@ -44,7 +44,10 @@ public final class IntentParser {
     private static final Pattern OWNER_REPO = Pattern.compile(
             "(?<![\\w./-])([A-Za-z0-9][A-Za-z0-9-]{0,38})/([A-Za-z0-9._-]{1,100})(?![\\w/])");
 
-    private static final Pattern FIRST_PERSON = Pattern.compile("\\b(my|mine|i|me|own|owned)\\b");
+    // Require an ownership/identity construction. Incidental "me" in phrases such as
+    // "tell me whether these repositories match" must not select a personal-items recipe.
+    private static final Pattern FIRST_PERSON = Pattern.compile(
+            "\\b(my|mine|own|owned)\\b|\\bfor me\\b|\\bwho am i\\b|\\bwhat am i\\b");
     private static final Pattern ACCOUNT_WORDS = Pattern.compile(
             "\\b(who am i|whoami|account|login|username|user name|profile|identity|signed in|logged in|authenticated)\\b");
     private static final Pattern REPO_WORDS = Pattern.compile("\\b(repo|repos|repository|repositories|projects?)\\b");

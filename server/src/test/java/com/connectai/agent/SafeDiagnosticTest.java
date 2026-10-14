@@ -26,4 +26,13 @@ class SafeDiagnosticTest {
 
         assertThat(safe).hasSize(24).doesNotContain("\n");
     }
+
+    @Test
+    void redactsProviderRateLimitResponseBody() {
+        String safe = SafeDiagnostic.sanitize(
+                "Planner error: Groq HTTP 429: {\"organization\":\"org-private\",\"message\":\"try later\"}", 500);
+
+        assertThat(safe).contains("LLM provider rate limit (HTTP 429)")
+                .doesNotContain("org-private", "try later");
+    }
 }

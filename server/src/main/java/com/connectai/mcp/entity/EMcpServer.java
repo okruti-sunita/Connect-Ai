@@ -124,6 +124,14 @@ public class EMcpServer extends AbstractUUIDPersistable {
         this.status = McpConnectionStatus.DISCONNECTED;
     }
 
+    /** Replaces the full encrypted multi-header configuration without changing its method. */
+    public void replaceAuthConfiguration(String encryptedConfiguration) {
+        this.encryptedAuthConfig = encryptedConfiguration;
+        this.encryptedSecret = null;
+        this.lastError = null;
+        this.status = McpConnectionStatus.DISCONNECTED;
+    }
+
     /** Stores a freshly issued OAuth token (already encrypted). The old one is replaced. */
     public void storeOAuthToken(String encryptedAccessToken, String encryptedRefreshToken, OffsetDateTime expiresAt) {
         this.encryptedSecret = encryptedAccessToken;

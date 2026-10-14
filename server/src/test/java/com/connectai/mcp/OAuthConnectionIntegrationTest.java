@@ -65,6 +65,23 @@ import static org.assertj.core.api.Assertions.assertThat;
                 "connectai.oauth.providers.google.client-secret=test-secret",
                 "connectai.oauth.providers.google.scopes=https://www.googleapis.com/auth/drive.readonly",
                 "connectai.oauth.providers.google.access-type=offline",
+                "connectai.oauth.providers.slack.display-name=Slack",
+                "connectai.oauth.providers.slack.authorize-url=https://slack.com/oauth/v2_user/authorize",
+                "connectai.oauth.providers.slack.client-id=slack-test-client",
+                "connectai.oauth.providers.slack.client-secret=slack-test-secret",
+                "connectai.oauth.providers.slack.redirect-uri=https://slack.example/api/oauth/callback",
+                "connectai.oauth.providers.slack.require-https-redirect=true",
+                // Regression: Slack must accept its documented `user` response even if an older
+                // runtime configuration still carries the generic `bearer` expectation.
+                "connectai.oauth.providers.slack.expected-token-type=bearer",
+                "connectai.oauth.providers.slack.resource=https://mcp.slack.com",
+                "connectai.oauth.providers.slack.scopes=search:read.public,search:read.private,channels:history,groups:history",
+                "connectai.oauth.providers.grafana.authorize-url=https://grafana.example/authorize",
+                "connectai.oauth.providers.grafana.token-url=https://grafana.example/token",
+                "connectai.oauth.providers.grafana.client-id=grafana-test-client",
+                "connectai.oauth.providers.grafana.client-secret=grafana-test-secret",
+                "connectai.oauth.providers.grafana.scopes=grafana:dashboards:read",
+                "connectai.oauth.providers.grafana.redirect-uri=https://grafana.example/api/oauth/callback",
                 "connectai.oauth.providers.unconfigured.authorize-url=https://other.example/authorize",
                 "connectai.oauth.providers.badendpoint.display-name=Invalid endpoint",
                 "connectai.oauth.providers.badendpoint.authorize-url=http://provider.example/authorize",
@@ -93,7 +110,9 @@ class OAuthConnectionIntegrationTest {
     static final AtomicReference<String> LAST_ISSUED_ACCESS_TOKEN = new AtomicReference<>();
     static final AtomicInteger ROTATING_REFRESH_COUNT = new AtomicInteger();
     static final AtomicReference<String> LAST_TOKEN_AUTHORIZATION = new AtomicReference<>();
+    static final AtomicReference<String> LAST_TOKEN_REDIRECT_URI = new AtomicReference<>();
     static final AtomicReference<Boolean> LAST_REVOKED_TOKEN_VALID = new AtomicReference<>(false);
+    static final AtomicReference<String> SLACK_TOKEN_TYPE = new AtomicReference<>("user");
 
     @LocalServerPort
     int port;
@@ -122,6 +141,15 @@ class OAuthConnectionIntegrationTest {
                 new ParameterizedTypeReference<java.util.List<Map<String, Object>>>() { }).getBody();
         assertThat(providers).anyMatch(p -> "fakegh".equals(p.get("id")) && Boolean.TRUE.equals(p.get("configured")));
         assertThat(providers).anyMatch(p -> "google".equals(p.get("id")) && Boolean.TRUE.equals(p.get("configured")));
+        assertThat(providers).anyMatch(p -> "slack".equals(p.get("id")) && Boolean.TRUE.equals(p.get("configured"))
+                && "https://slack.example/api/oauth/callback".equals(p.get("redirectUri")));
+        assertThat(providers).anyMatch(p -> "grafana".equals(p.get("id")) && Boolean.TRUE.equals(p.get("configured"))
+                && "https://grafana.example/api/oauth/callback".equals(p.get("redirectUri")));
+        assertThat(providers).anySatisfy(p -> {
+            if (!"slack".equals(p.get("id"))) return;
+            assertThat(p.get("scopes")).isEqualTo(java.util.List.of(
+                    "search:read.public", "search:read.private", "channels:history", "groups:history"));
+        });
         assertThat(providers).anyMatch(p -> "google".equals(p.get("id"))
                 && ((java.util.List<?>) p.get("scopes")).contains("https://www.googleapis.com/auth/drive.readonly"));
         assertThat(providers).anyMatch(p -> "unconfigured".equals(p.get("id")) && Boolean.FALSE.equals(p.get("configured")));
@@ -132,6 +160,14 @@ class OAuthConnectionIntegrationTest {
         assertThat(catalog).anySatisfy(item -> {
             @SuppressWarnings("unchecked") Map<String, Object> connector = (Map<String, Object>) item.get("connector");
             if (!"google-drive".equals(connector.get("key"))) return;
+            @SuppressWarnings("unchecked") var methods = (java.util.List<Map<String, Object>>) connector.get("methods");
+            assertThat(methods).anySatisfy(method -> assertThat(method)
+                    .containsEntry("id", "OAUTH_APP").containsEntry("supported", true));
+            assertThat(item).containsEntry("adminSetupRequired", false);
+        });
+        assertThat(catalog).anySatisfy(item -> {
+            @SuppressWarnings("unchecked") Map<String, Object> connector = (Map<String, Object>) item.get("connector");
+            if (!"slack".equals(connector.get("key"))) return;
             @SuppressWarnings("unchecked") var methods = (java.util.List<Map<String, Object>>) connector.get("methods");
             assertThat(methods).anySatisfy(method -> assertThat(method)
                     .containsEntry("id", "OAUTH_APP").containsEntry("supported", true));
@@ -282,22 +318,164 @@ class OAuthConnectionIntegrationTest {
 
     @Test
     @Order(7)
-    void callbackRequiresTheInitiatingBrowserBindingCookie() {
+    void slackUserOAuthUsesHttpsCallbackResourceAndDiscoversTools() {
+        ResponseEntity<Map<String, Object>> created = register("Slack - OAuth", "slack");
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        UUID id = UUID.fromString(created.getBody().get("id").toString());
+        Map<String, Object> started = startOAuth(id.toString());
+        String authorizationUrl = started.get("authorizationUrl").toString();
+        Map<String, String> query = UriComponentsBuilder.fromUriString(authorizationUrl).build()
+                .getQueryParams().toSingleValueMap();
+        assertThat(authorizationUrl).startsWith("https://slack.com/oauth/v2_user/authorize?");
+        assertThat(query).containsEntry("client_id", "slack-test-client")
+                .containsEntry("code_challenge_method", "S256");
+        assertThat(decode(query.get("resource"))).isEqualTo("https://mcp.slack.com");
+        assertThat(decode(query.get("scope")))
+                .isEqualTo("search:read.public,search:read.private,channels:history,groups:history");
+        assertThat(decode(query.get("redirect_uri")))
+                .isEqualTo("https://slack.example/api/oauth/callback");
+
+        CODE_CHALLENGES.put("slack-good-code", query.get("code_challenge"));
+        callback("/api/oauth/callback?code=slack-good-code&state=" + query.get("state"), query.get("state"));
+
+        assertThat(attempt(started.get("attemptId").toString())).containsEntry("status", "SUCCEEDED");
+        assertThat(connections.status(id).initialized()).isTrue();
+        assertThat(discovery.discover(id).tools()).isNotEmpty();
+        assertThat(LAST_MCP_AUTHORIZATION.get()).isEqualTo("Bearer xoxp_fake_slack_user_token");
+        var persisted = servers.findById(id).orElseThrow();
+        assertThat(persisted.hasCredential()).isTrue();
+        assertThat(persisted.getEncryptedSecret()).doesNotContain("xoxp_fake_slack_user_token");
+        assertThat(http.exchange("/api/tools/" + id, HttpMethod.GET, null, MAP).getBody().toString())
+                .doesNotContain("xoxp_fake_slack_user_token", "slack-test-secret");
+        connections.disconnect(id);
+        connections.remove(id);
+    }
+
+    @Test
+    @Order(10)
+    void grafanaAuthorizationUsesItsRegisteredProviderSpecificCallback() {
+        ResponseEntity<Map<String, Object>> created = register("Grafana - OAuth", "grafana");
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        UUID id = UUID.fromString(created.getBody().get("id").toString());
+
+        Map<String, Object> started = startOAuth(id.toString());
+        String authorizationUrl = started.get("authorizationUrl").toString();
+        Map<String, String> query = UriComponentsBuilder.fromUriString(authorizationUrl).build()
+                .getQueryParams().toSingleValueMap();
+
+        assertThat(authorizationUrl).startsWith("https://grafana.example/authorize?");
+        assertThat(query).containsEntry("client_id", "grafana-test-client")
+                .containsEntry("code_challenge_method", "S256");
+        assertThat(decode(query.get("redirect_uri")))
+                .isEqualTo("https://grafana.example/api/oauth/callback");
+
+        CODE_CHALLENGES.put("grafana-good-code", query.get("code_challenge"));
+        callback("/api/oauth/callback?code=grafana-good-code&state=" + query.get("state"), query.get("state"));
+
+        assertThat(attempt(started.get("attemptId").toString())).containsEntry("status", "SUCCEEDED");
+        assertThat(LAST_TOKEN_REDIRECT_URI.get()).isEqualTo("https://grafana.example/api/oauth/callback");
+        connections.disconnect(id);
+        connections.remove(id);
+    }
+
+    @Test
+    @Order(8)
+    void slackOkFalseTokenResponseDoesNotPersistCredential() {
+        ResponseEntity<Map<String, Object>> created = register("Slack - Failed OAuth", "slack");
+        UUID id = UUID.fromString(created.getBody().get("id").toString());
+        Map<String, Object> started = startOAuth(id.toString());
+        Map<String, String> query = UriComponentsBuilder.fromUriString(started.get("authorizationUrl").toString())
+                .build().getQueryParams().toSingleValueMap();
+        CODE_CHALLENGES.put("slack-error-code", query.get("code_challenge"));
+
+        callback("/api/oauth/callback?code=slack-error-code&state=" + query.get("state"), query.get("state"));
+
+        assertThat(attempt(started.get("attemptId").toString())).containsEntry("status", "FAILED");
+        assertThat(servers.findById(id).orElseThrow().hasCredential()).isFalse();
+        assertThat(servers.findById(id).orElseThrow().getLastError()).contains("invalid_code");
+        connections.remove(id);
+    }
+
+    @Test
+    @Order(13)
+    void slackUserEndpointAlsoAcceptsGenericBearerTokenTypeLabel() {
+        ResponseEntity<Map<String, Object>> created = register("Slack - Bearer Label", "slack");
+        UUID id = UUID.fromString(created.getBody().get("id").toString());
+        Map<String, Object> started = startOAuth(id.toString());
+        Map<String, String> query = UriComponentsBuilder.fromUriString(started.get("authorizationUrl").toString())
+                .build().getQueryParams().toSingleValueMap();
+        CODE_CHALLENGES.put("slack-bearer-code", query.get("code_challenge"));
+
+        SLACK_TOKEN_TYPE.set("bearer");
+        try {
+            callback("/api/oauth/callback?code=slack-bearer-code&state=" + query.get("state"), query.get("state"));
+        } finally {
+            SLACK_TOKEN_TYPE.set("user");
+        }
+
+        assertThat(attempt(started.get("attemptId").toString())).containsEntry("status", "SUCCEEDED");
+        assertThat(LAST_MCP_AUTHORIZATION.get()).isEqualTo("Bearer xoxp_fake_slack_user_token");
+        connections.disconnect(id);
+        connections.remove(id);
+    }
+
+    @Test
+    @Order(14)
+    void slackUserEndpointRejectsBotTokensWithSafeTokenTypeDiagnostic() {
+        ResponseEntity<Map<String, Object>> created = register("Slack - Bot Token Rejection", "slack");
+        UUID id = UUID.fromString(created.getBody().get("id").toString());
+        Map<String, Object> started = startOAuth(id.toString());
+        Map<String, String> query = UriComponentsBuilder.fromUriString(started.get("authorizationUrl").toString())
+                .build().getQueryParams().toSingleValueMap();
+        CODE_CHALLENGES.put("slack-bot-code", query.get("code_challenge"));
+
+        SLACK_TOKEN_TYPE.set("bot");
+        try {
+            callback("/api/oauth/callback?code=slack-bot-code&state=" + query.get("state"), query.get("state"));
+        } finally {
+            SLACK_TOKEN_TYPE.set("user");
+        }
+
+        assertThat(attempt(started.get("attemptId").toString())).containsEntry("status", "FAILED")
+                .containsEntry("message", "The provider returned an unsupported token type (bot).");
+        assertThat(servers.findById(id).orElseThrow().hasCredential()).isFalse();
+        connections.remove(id);
+    }
+
+    @Test
+    @Order(9)
+    void crossHostCallbackRelaysBackToTheInitiatingBrowserAndKeepsCookieBinding() {
         String state = startState();
         String attemptId = attemptByState.get(state);
         CODE_CHALLENGES.put("bound-code", challengeOf(state));
         ResponseEntity<String> unbound = http.getForEntity(
                 "/api/oauth/callback?code=bound-code&state=" + state, String.class);
-        assertThat(unbound.getBody()).contains("did not originate from this browser");
+        assertThat(unbound.getBody()).contains("connect-ai-oauth-callback")
+                .contains("data-target-origin=\"http://localhost:5173\"")
+                .contains("data-code=\"bound-code\"");
         assertThat(attempt(attemptId)).containsEntry("status", "PENDING");
 
-        assertThat(callback("/api/oauth/callback?code=bound-code&state=" + state, state).getBody())
-                .contains("Access granted");
+        HttpHeaders untrustedHeaders = new HttpHeaders();
+        untrustedHeaders.setOrigin("https://attacker.example");
+        untrustedHeaders.add(HttpHeaders.COOKIE, bindingCookieByState.get(state));
+        Map<String, String> completion = Map.of("state", state, "code", "bound-code");
+        ResponseEntity<String> rejected = http.exchange("/api/oauth/callback/complete", HttpMethod.POST,
+                new HttpEntity<>(completion, untrustedHeaders), String.class);
+        assertThat(rejected.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(attempt(attemptId)).containsEntry("status", "PENDING");
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setOrigin("http://localhost:5173");
+        headers.add(HttpHeaders.COOKIE, bindingCookieByState.get(state));
+        ResponseEntity<Map<String, Object>> completed = http.exchange("/api/oauth/callback/complete", HttpMethod.POST,
+                new HttpEntity<>(completion, headers), MAP);
+        assertThat(completed.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(completed.getBody()).containsEntry("status", "SUCCEEDED");
         assertThat(attempt(attemptId)).containsEntry("status", "SUCCEEDED");
     }
 
     @Test
-    @Order(8)
+    @Order(10)
     void providerCanUseHttpBasicClientAuthentication() {
         ResponseEntity<Map<String, Object>> created = register("Basic OAuth", "fakebasic");
         String id = created.getBody().get("id").toString();
@@ -313,7 +491,7 @@ class OAuthConnectionIntegrationTest {
     }
 
     @Test
-    @Order(9)
+    @Order(11)
     void removingOAuthConnectionAttemptsConfiguredProviderRevocation() {
         ResponseEntity<Map<String, Object>> created = register("Revocation test", "fakegh");
         String id = created.getBody().get("id").toString();
@@ -333,7 +511,7 @@ class OAuthConnectionIntegrationTest {
     }
 
     @Test
-    @Order(10)
+    @Order(12)
     void failedRefreshMarksConnectionAsReauthorizationRequiredAndSignInRecoversIt() {
         ResponseEntity<Map<String, Object>> created = register("Refresh failure", "fakegh");
         UUID id = UUID.fromString(created.getBody().get("id").toString());
@@ -401,7 +579,8 @@ class OAuthConnectionIntegrationTest {
         ResponseEntity<Map<String, Object>> response = http.exchange(
                 "/api/tools/" + id + "/oauth/start", HttpMethod.POST, null, MAP);
         String cookie = response.getHeaders().getFirst(HttpHeaders.SET_COOKIE);
-        assertThat(cookie).contains("HttpOnly").contains("SameSite=Lax").contains("Path=/api/oauth/callback");
+        assertThat(cookie).contains("HttpOnly").contains("Path=/api/oauth/callback");
+        assertThat(cookie).contains(cookie.contains("Secure") ? "SameSite=None" : "SameSite=Lax");
         assertThat(response.getHeaders().getCacheControl()).contains("no-store");
         String value = cookie == null ? "" : cookie.split(";", 2)[0];
         String authorizationUrl = response.getBody().get("authorizationUrl").toString();
@@ -469,6 +648,10 @@ class OAuthConnectionIntegrationTest {
                 () -> "http://127.0.0.1:" + TOKEN_SERVER.getAddress().getPort() + "/token");
         registry.add("connectai.oauth.providers.google.token-url",
                 () -> "http://127.0.0.1:" + TOKEN_SERVER.getAddress().getPort() + "/token");
+        registry.add("connectai.oauth.providers.slack.token-url",
+                () -> "http://127.0.0.1:" + TOKEN_SERVER.getAddress().getPort() + "/token");
+        registry.add("connectai.oauth.providers.grafana.token-url",
+                () -> "http://127.0.0.1:" + TOKEN_SERVER.getAddress().getPort() + "/token");
         registry.add("connectai.oauth.providers.fakebasic.token-url",
                 () -> "http://127.0.0.1:" + TOKEN_SERVER.getAddress().getPort() + "/token");
         registry.add("connectai.oauth.providers.fakegh.revocation-url",
@@ -494,6 +677,7 @@ class OAuthConnectionIntegrationTest {
                         form.put(decode(pair.substring(0, eq)), decode(pair.substring(eq + 1)));
                     }
                 }
+                LAST_TOKEN_REDIRECT_URI.set(form.get("redirect_uri"));
                 String json;
                 try {
                     json = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(
@@ -516,15 +700,21 @@ class OAuthConnectionIntegrationTest {
 
     private static Map<String, Object> respond(Map<String, String> form, String authorization) throws Exception {
         boolean validBasic = false;
+        boolean validGrafanaBasic = false;
         if (authorization != null && authorization.startsWith("Basic ")) {
             String[] credentials = new String(Base64.getDecoder().decode(authorization.substring(6)), StandardCharsets.UTF_8).split(":", 2);
             validBasic = credentials.length == 2
                     && "test:client".equals(decode(credentials[0]))
                     && "test+secret".equals(decode(credentials[1]));
+            validGrafanaBasic = credentials.length == 2
+                    && "grafana-test-client".equals(decode(credentials[0]))
+                    && "grafana-test-secret".equals(decode(credentials[1]));
         }
         boolean validPost = "test-client".equals(form.get("client_id"))
                 && "test-secret".equals(form.get("client_secret"));
-        if (!validBasic && !validPost) {
+        boolean validSlack = "slack-test-client".equals(form.get("client_id"))
+                && "slack-test-secret".equals(form.get("client_secret"));
+        if (!validBasic && !validGrafanaBasic && !validPost && !validSlack) {
             return Map.of("error", "incorrect_client_credentials");
         }
         if ("refresh_token".equals(form.get("grant_type"))) {
@@ -543,6 +733,13 @@ class OAuthConnectionIntegrationTest {
             return Map.of("error", "bad_verification_code", "error_description", "secret-value");
         }
         CODE_CHALLENGES.remove(form.get("code"));
+        if ("slack-error-code".equals(form.get("code"))) {
+            return Map.of("ok", false, "error", "invalid_code");
+        }
+        if (validSlack) {
+            return Map.of("ok", true, "access_token", "xoxp_fake_slack_user_token", "token_type", SLACK_TOKEN_TYPE.get(),
+                    "team", Map.of("id", "T_FAKE"));
+        }
         String expiresIn = NEXT_EXPIRES_IN.get();
         if (expiresIn != null) {
             return Map.of("access_token", "gho_expiring_token", "token_type", "bearer",

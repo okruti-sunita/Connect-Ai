@@ -20,7 +20,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.spec.McpSchema;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -32,7 +33,6 @@ import java.util.Map;
 import java.util.Set;
 
 @Service
-@RequiredArgsConstructor
 public class CatalogConnectionService {
     private static final int MAX_PAGES = 100;
 
@@ -43,6 +43,31 @@ public class CatalogConnectionService {
     private final McpServerRepository servers;
     private final SecretEncryptionService encryption;
     private final ObjectMapper mapper;
+    private final boolean allowPrivateHosts;
+
+    @Autowired
+    public CatalogConnectionService(McpCatalogService catalog, McpClientFactory clientFactory,
+                                    McpConnectionService connections, McpToolDiscoveryService discovery,
+                                    McpServerRepository servers, SecretEncryptionService encryption,
+                                    ObjectMapper mapper,
+                                    @Value("${connectai.mcp.allow-private-hosts:false}") boolean allowPrivateHosts) {
+        this.catalog = catalog;
+        this.clientFactory = clientFactory;
+        this.connections = connections;
+        this.discovery = discovery;
+        this.servers = servers;
+        this.encryption = encryption;
+        this.mapper = mapper;
+        this.allowPrivateHosts = allowPrivateHosts;
+    }
+
+    /** Convenience constructor for focused service tests; private URL access stays disabled. */
+    public CatalogConnectionService(McpCatalogService catalog, McpClientFactory clientFactory,
+                                    McpConnectionService connections, McpToolDiscoveryService discovery,
+                                    McpServerRepository servers, SecretEncryptionService encryption,
+                                    ObjectMapper mapper) {
+        this(catalog, clientFactory, connections, discovery, servers, encryption, mapper, false);
+    }
 
     public McpConnectionTestResponse test(CreateMcpConnectionRequest request) {
         EMcpServer candidate = candidate(request);
@@ -52,6 +77,7 @@ public class CatalogConnectionService {
             McpSchema.InitializeResult initialized = client.initialize();
             if (initialized == null) throw new IllegalStateException("MCP server returned no initialize result");
             List<String> toolNames = listToolNames(client);
+            if (toolNames.isEmpty()) throw new com.connectai.mcp.client.NoMcpToolsDiscoveredException();
             return new McpConnectionTestResponse(true, List.of(
                     new McpConnectionTestResponse.Step("endpoint", true, "ENDPOINT_REACHABLE", "Endpoint responded", null),
                     new McpConnectionTestResponse.Step("initialize", true, "MCP_INITIALIZED", "MCP handshake completed", null),
@@ -60,9 +86,12 @@ public class CatalogConnectionService {
         } catch (Exception exception) {
             String message = safeMessage(exception);
             return new McpConnectionTestResponse(false, List.of(
-                    new McpConnectionTestResponse.Step("connection", false, "CONNECTION_FAILED", message,
+                    new McpConnectionTestResponse.Step("connection", false,
+                            exception instanceof com.connectai.mcp.client.NoMcpToolsDiscoveredException
+                                    ? "EMPTY_TOOL_LIST" : "CONNECTION_FAILED", message,
                             "Check the endpoint, authentication method, and server availability.")),
-                    0, List.of(), "CONNECTION_FAILED", message,
+                    0, List.of(), exception instanceof com.connectai.mcp.client.NoMcpToolsDiscoveredException
+                            ? "EMPTY_TOOL_LIST" : "CONNECTION_FAILED", message,
                     "Verify the endpoint and credentials, then retry.");
         } finally {
             if (client != null) {
@@ -113,6 +142,7 @@ public class CatalogConnectionService {
         }
         Map<String, String> credentials = request.credentials();
         validateCredentials(request.method(), credentials);
+        if ("grafana".equals(request.catalogKey())) validateGrafanaCredentials(request.method(), credentials);
         boolean duplicate = servers.findAll().stream().anyMatch(server ->
                 server.getName().equalsIgnoreCase(request.name().trim()));
         if (duplicate) throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -144,6 +174,33 @@ public class CatalogConnectionService {
         }
     }
 
+    private void validateGrafanaCredentials(ConnectMethod method, Map<String, String> credentials) {
+        if (method != ConnectMethod.TOKEN_HEADERS) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Grafana connections require the service-account header method.");
+        }
+        String grafanaUrl = credentials.get("header:X-Grafana-URL");
+        String serviceToken = credentials.get("header:X-Grafana-Service-Account-Token");
+        if (serviceToken == null || serviceToken.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A Grafana service-account token is required.");
+        }
+        try { com.connectai.mcp.client.GrafanaInstanceUrlPolicy.validate(grafanaUrl, allowPrivateHosts); }
+        catch (IllegalArgumentException ex) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage()); }
+        for (String key : credentials.keySet()) {
+            if (!key.equals("header:X-Grafana-URL")
+                    && !key.equals("header:X-Grafana-Service-Account-Token")
+                    && !key.equals("header:Authorization")) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Grafana supports only the documented instance, service-account, and optional MCP bearer headers.");
+            }
+        }
+        String endpointAuth = credentials.get("header:Authorization");
+        if (endpointAuth != null && !endpointAuth.isBlank() && !endpointAuth.startsWith("Bearer ")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "The optional MCP endpoint credential must use Bearer authentication.");
+        }
+    }
+
     private static void require(Map<String, String> credentials, String name) {
         if (credentials.get(name) == null || credentials.get(name).isBlank())
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "A required credential field is missing: " + name);
@@ -166,6 +223,9 @@ public class CatalogConnectionService {
     }
 
     private static String safeMessage(Exception exception) {
+        if (exception instanceof com.connectai.mcp.client.NoMcpToolsDiscoveredException) {
+            return com.connectai.mcp.client.NoMcpToolsDiscoveredException.MESSAGE;
+        }
         if (exception instanceof java.net.http.HttpConnectTimeoutException
                 || exception instanceof java.net.http.HttpTimeoutException
                 || exception instanceof java.util.concurrent.TimeoutException) {
@@ -173,6 +233,19 @@ public class CatalogConnectionService {
         }
         if (exception instanceof java.net.UnknownHostException) {
             return "The MCP endpoint host could not be resolved.";
+        }
+        for (Throwable cause = exception; cause != null; cause = cause.getCause()) {
+            String message = cause.getMessage();
+            if (message == null) continue;
+            if (message.contains("401") || message.toLowerCase(java.util.Locale.ROOT).contains("unauthorized")) {
+                return "The MCP endpoint rejected its caller credentials (HTTP 401). Check the optional MCP endpoint bearer token.";
+            }
+            if (message.contains("403") || message.toLowerCase(java.util.Locale.ROOT).contains("forbidden")) {
+                return "The MCP endpoint or Grafana account denied access (HTTP 403). Check the endpoint authentication and Grafana service-account RBAC permissions.";
+            }
+            if (message.contains("404")) {
+                return "The MCP endpoint was not found (HTTP 404). Check the Streamable HTTP URL path.";
+            }
         }
         return "MCP connection, initialization, or tool discovery failed. Check the endpoint and authentication, then retry.";
     }

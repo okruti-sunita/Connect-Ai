@@ -42,6 +42,8 @@ class IntentParserTest {
             "commits and issues in octo/api",                          // ambiguous mix
             "show my commits",                                         // needs a repository
             "pull requests in octo/api since monday",                  // time window: agent
+            "Search GitHub repositories for the exact name codex-connector-audit-probe-20261014 and tell me whether a match exists.",
+            "Search Linear for issues containing the exact phrase codex-connector-audit-probe-20261014 and tell me whether a match exists.",
     })
     void leavesEverythingElseToTheAgent(String question) {
         assertThat(IntentParser.parse(question)).isEmpty();

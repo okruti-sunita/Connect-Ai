@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useState} from 'react';
+import {useCallback, useEffect, useRef, useState} from 'react';
 import {Alert, Button, Dropdown, Modal, message} from 'antd';
 import {Ellipsis, Plus} from 'lucide-react';
 import './style/tools.scss';
@@ -19,6 +19,8 @@ const ToolsView = () => {
     const [loadError, setLoadError] = useState<string | null>(null);
     const [capCounts, setCapCounts] = useState<Record<string, number>>({});
     const [busyId, setBusyId] = useState<string | null>(null);
+    const [oauthAuthorizationLink, setOauthAuthorizationLink] = useState<{name: string; url: string} | null>(null);
+    const activeOauthPopup = useRef<Window | null>(null);
     const [filter, setFilter] = useState<'All' | ToolCategory>('All');
     const [modal, setModal] = useState<{ open: boolean; preset: CatalogItem | null; session: number }>({open: false, preset: null, session: 0});
     const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -52,10 +54,13 @@ const ToolsView = () => {
     /** OAuth callback exchanges the token, reconnects MCP, and discovers tools before it succeeds. */
     const signIn = (tool: McpServerDto) => {
         const popup = openSignInPopup(); // synchronously inside the click, or the browser blocks it
+        activeOauthPopup.current = popup;
         void (async () => {
             setBusyId(tool.id);
+            setOauthAuthorizationLink(null);
             try {
-                const result = await signInWithPopup(tool.id, popup);
+                const result = await signInWithPopup(tool.id, popup, undefined, (url) =>
+                    setOauthAuthorizationLink({name: tool.name, url}));
                 if (!result.ok) {
                     message.error(result.message);
                     return;
@@ -64,6 +69,7 @@ const ToolsView = () => {
             } catch (error) {
                 message.error(error instanceof Error ? error.message : 'Sign-in failed.');
             } finally {
+                if (activeOauthPopup.current === popup) activeOauthPopup.current = null;
                 setBusyId(null);
                 await refresh();
             }
@@ -161,6 +167,21 @@ const ToolsView = () => {
                 </button>
             </div>
 
+            {oauthAuthorizationLink && busyId && (
+                <Alert type="info" showIcon closable onClose={() => setOauthAuthorizationLink(null)}
+                       title={`${oauthAuthorizationLink.name} sign-in is ready`} description={
+                    <a href={oauthAuthorizationLink.url} target="connectai-oauth" onClick={(event) => {
+                        const popup = activeOauthPopup.current;
+                        if (popup && !popup.closed) {
+                            event.preventDefault();
+                            popup.focus();
+                        }
+                    }}>
+                        Open the authorization page in Chrome
+                    </a>
+                }/>
+            )}
+
             <h2 className="section-title">Your connections ({tools.length})</h2>
             {loadError && (
                 <Alert type="error" showIcon title={loadError} action={<Button size="small" onClick={() => void refresh()}>Try again</Button>}/>
@@ -232,11 +253,20 @@ const ToolsView = () => {
                 {catalog.map((item) => {
                     const added = item.connectionCount > 0 || tools.some((t) => t.catalogKey === item.key);
                     const availableMethod = item.methods.find((candidate) => candidate.supported);
-                    const cardStatus = item.adminSetupRequired ? 'Administrator setup required'
+                    const oauthMethodDeclared = item.methods.some((candidate) => candidate.id === 'OAUTH_APP');
+                    const oauthSetupRequired = item.adminSetupRequired && oauthMethodDeclared;
+                    const cardStatus = oauthSetupRequired ? `${item.name} OAuth setup required`
+                        : item.adminSetupRequired ? 'Administrator setup required'
                         : item.status === 'AVAILABLE' ? `Ready to connect${availableMethod ? ` using ${availableMethod.label}` : ''}`
                             : item.status === 'NEEDS_SIGN_IN' ? 'Sign-in required'
                                 : item.status === 'CONNECTED' ? 'Connected'
-                                    : item.status === 'CONNECTION_ERROR' ? 'Connection failed' : 'Setup required';
+                                    : item.status === 'CONNECTION_ERROR' ? 'Connection failed'
+                                        : item.status === 'SETUP_REQUIRED' ? 'MCP endpoint or setup required' : 'Unavailable';
+                    const statusBadge = oauthSetupRequired ? 'server setup'
+                        : item.status === 'AVAILABLE' ? 'available'
+                        : item.status === 'CONNECTED' ? 'connected'
+                            : item.status === 'NEEDS_SIGN_IN' ? 'sign-in required'
+                                : item.adminSetupRequired ? 'admin setup' : 'setup required';
                     return (
                         <article key={item.id} className="catalog-card">
                             <div className="catalog-top"><ToolLogo name={item.name} item={item} size={36}/><h3>{item.name}</h3></div>
@@ -244,8 +274,10 @@ const ToolsView = () => {
                             <p className={`catalog-state${item.adminSetupRequired ? ' admin-setup' : ''}`} title={item.statusReason}>{cardStatus}</p>
                             <div className="catalog-foot">
                                 <span className="pill">{item.category}</span>
-                                <button type="button" className="link-btn" disabled={!item.methods.some((candidate) => candidate.supported)}
-                                        onClick={() => openWizard(item)}>{added ? 'Add another connection' : 'Connect'}</button>
+                                <span className="pill">{availableMethod?.label ?? (oauthSetupRequired ? 'OAuth setup required' : 'No supported method')}</span>
+                                <span className={`pill catalog-availability ${item.adminSetupRequired ? 'admin' : item.status === 'CONNECTION_ERROR' ? 'bad' : ''}`}>{statusBadge}</span>
+                                <button type="button" className="link-btn" disabled={!item.methods.some((candidate) => candidate.supported) && !oauthSetupRequired}
+                                        onClick={() => openWizard(item)}>{oauthSetupRequired ? 'Setup instructions' : added ? 'Add another connection' : 'Connect'}</button>
                             </div>
                         </article>
                     );

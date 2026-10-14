@@ -26,6 +26,7 @@ class GroqClientTest {
     private GroqClient client;
     private volatile int status = 200;
     private volatile String responseJson = "{}";
+    private volatile String retryAfter;
     private final AtomicReference<String> requestBody = new AtomicReference<>();
     private final AtomicReference<String> authorization = new AtomicReference<>();
 
@@ -37,6 +38,7 @@ class GroqClientTest {
             authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
             byte[] bytes = responseJson.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("content-type", "application/json");
+            if (retryAfter != null) exchange.getResponseHeaders().add("Retry-After", retryAfter);
             exchange.sendResponseHeaders(status, bytes.length);
             exchange.getResponseBody().write(bytes);
             exchange.close();
@@ -127,19 +129,19 @@ class GroqClientTest {
     }
 
     @Test
-    void providerApiErrorIncludesStatusAndBodyWithoutExposingApiKey() {
+    void providerApiErrorIsSanitized() {
         status = 401;
         responseJson = "{\"error\":{\"message\":\"invalid API key\"}}";
 
         assertThatThrownBy(() -> client.callTool("s", "u", tool()))
                 .isInstanceOf(LlmException.class)
-                .hasMessageContaining("Groq HTTP 401")
-                .hasMessageContaining("invalid API key")
+                .hasMessageContaining("HTTP 401")
+                .hasMessageNotContaining("invalid API key")
                 .hasMessageNotContaining("test-key");
     }
 
     @Test
-    void groqJsonWrapperValidationFailureIsReportedWithoutLeakingCredentials() throws Exception {
+    void providerValidationFailureDoesNotExposeBody() throws Exception {
         status = 400;
         responseJson = """
                 {"error":{"message":"Tool call validation failed: attempted to call tool 'json' which was not in request.tools",
@@ -148,12 +150,28 @@ class GroqClientTest {
 
         assertThatThrownBy(() -> client.callTool("s", "u", tool()))
                 .isInstanceOf(LlmException.class)
-                .hasMessageContaining("Groq HTTP 400")
-                .hasMessageContaining("attempted to call tool 'json'")
+                .hasMessageContaining("HTTP 400")
+                .hasMessageNotContaining("attempted to call tool 'json'")
+                .hasMessageNotContaining("failed_generation")
                 .hasMessageNotContaining("test-key");
         JsonNode sent = mapper.readTree(requestBody.get());
         assertThat(sent.path("tools").isMissingNode()).isTrue();
         assertThat(sent.path("response_format").path("type").asText()).isEqualTo("json_schema");
+    }
+
+    @Test
+    void rateLimitIsTypedAndCarriesRetryAfterWithoutProviderBody() {
+        status = 429;
+        retryAfter = "17";
+        responseJson = "{\"error\":{\"message\":\"secret org-private diagnostic\"}}";
+
+        assertThatThrownBy(() -> client.callTool("s", "u", tool()))
+                .isInstanceOfSatisfying(LlmProviderException.class, failure -> {
+                    assertThat(failure.statusCode()).isEqualTo(429);
+                    assertThat(failure.retryAfterSeconds()).isEqualTo(17L);
+                    assertThat(failure.getMessage()).contains("Retry after 17 seconds")
+                            .doesNotContain("org-private", "secret");
+                });
     }
 
     private static ToolSpec tool() {

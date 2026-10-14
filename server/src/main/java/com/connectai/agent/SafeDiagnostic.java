@@ -9,6 +9,9 @@ public final class SafeDiagnostic {
             "(?i)([\\\"']?\\b(?:access[_-]?token|refresh[_-]?token|client[_-]?secret|authorization[_-]?code|code|state|token|secret|password|passwd|api[_-]?key|authorization|cookie)\\b[\\\"']?\\s*(?:=|:)\\s*[\\\"']?)([^\\\"'\\s&,;\\]}]+)([\\\"']?)");
     private static final Pattern BEARER = Pattern.compile("(?i)\\b(Bearer\\s+)[A-Za-z0-9._~+/=-]+");
     private static final Pattern URL_USER_INFO = Pattern.compile("(https?://)[^/@\\s]+:[^/@\\s]+@");
+    /** Provider error bodies can contain organization identifiers, request IDs, and echoed input. */
+    private static final Pattern LLM_RATE_LIMIT_DETAIL = Pattern.compile(
+            "(?i)((?:groq\\s+)?http\\s+429\\s*:\\s*).*");
 
     private SafeDiagnostic() {
     }
@@ -29,6 +32,7 @@ public final class SafeDiagnostic {
         safe = SECRET_ASSIGNMENT.matcher(safe).replaceAll("$1[REDACTED]$3");
         safe = BEARER.matcher(safe).replaceAll("$1[REDACTED]");
         safe = URL_USER_INFO.matcher(safe).replaceAll("$1[REDACTED]@");
+        safe = LLM_RATE_LIMIT_DETAIL.matcher(safe).replaceAll("LLM provider rate limit (HTTP 429)");
         return safe.length() <= maxLength ? safe : safe.substring(0, maxLength - 3) + "...";
     }
 }

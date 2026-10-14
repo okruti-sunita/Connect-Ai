@@ -180,6 +180,17 @@ public final class ToolShortlister {
      * the result as an answer.
      */
     public static TopicCoverage topicCoverage(String question, List<McpToolCandidate> catalog) {
+        return topicCoverage(question, catalog, false);
+    }
+
+    /**
+     * Adds schema-backed free-text search tools when the user names the provider explicitly.
+     * A provider search endpoint can answer arbitrary subject words even when those words
+     * cannot appear in its metadata. Requiring an explicit provider keeps this fallback from
+     * turning every generic search tool into a weak match for every question.
+     */
+    public static TopicCoverage topicCoverage(
+            String question, List<McpToolCandidate> catalog, boolean explicitlyScopedProvider) {
         List<String> topics = new ArrayList<>();
         // Only words that name a kind of data gate tools. Entity names ("PAY-123", "octo/api") and
         // ordinary verbs never do, so generic search tools stay available for them.
@@ -192,6 +203,7 @@ public final class ToolShortlister {
         Set<String> covered = new LinkedHashSet<>();
         List<McpToolCandidate> covering = new ArrayList<>();
         for (McpToolCandidate tool : catalog == null ? List.<McpToolCandidate>of() : catalog) {
+            if (conflictsWithRequestedDomain(question, tool)) continue;
             String description = tool.description();
             Set<String> toolTokens = tokens(tool.toolName() + " " + tool.title() + " "
                     + description.substring(0, Math.min(description.length(), TOPIC_DESCRIPTION_CHARS)));
@@ -216,8 +228,39 @@ public final class ToolShortlister {
             }
         }
 
+        if (explicitlyScopedProvider) {
+            for (McpToolCandidate tool : catalog == null ? List.<McpToolCandidate>of() : catalog) {
+                if (isFreeTextSearch(tool) && !covering.contains(tool)) {
+                    covering.add(tool);
+                }
+            }
+        }
+
         List<String> uncovered = topics.stream().filter(topic -> !covered.contains(topic)).toList();
         return new TopicCoverage(List.copyOf(topics), uncovered, List.copyOf(covering));
+    }
+
+    /** Prevents lexical collisions such as Grafana log-label queries selecting issue labels. */
+    private static boolean conflictsWithRequestedDomain(String question, McpToolCandidate tool) {
+        String q = question.toLowerCase(Locale.ROOT);
+        boolean observability = q.matches("(?s).*(\\blog(s|ging)?\\b|\\bmetric(s)?\\b|\\bloki\\b|\\bprometheus\\b|\\bdatasource(s)?\\b|\\bgrafana\\b).*");
+        if (!observability) return false;
+        String provider = tool.providerKey().toLowerCase(Locale.ROOT);
+        String identity = (provider + " " + tool.serverName() + " " + tool.toolName() + " " + tool.title() + " "
+                + tool.description()).toLowerCase(Locale.ROOT);
+        boolean observabilityTool = provider.equals("grafana") || identity.matches("(?s).*(\\blog(s|ogging)?\\b|\\bmetric(s)?\\b|\\bloki\\b|\\bprometheus\\b|\\bdatasource(s)?\\b|\\bobservability\\b).*");
+        return !observabilityTool;
+    }
+
+    private static boolean isFreeTextSearch(McpToolCandidate tool) {
+        String operation = (tool.toolName() + " " + tool.title() + " " + tool.description())
+                .toLowerCase(Locale.ROOT);
+        if (!operation.contains("search")) return false;
+        Object propertiesValue = tool.inputSchema().get("properties");
+        if (!(propertiesValue instanceof Map<?, ?> properties)) return false;
+        return properties.keySet().stream().map(String::valueOf)
+                .map(key -> key.replaceAll("[_-]", "").toLowerCase(Locale.ROOT))
+                .anyMatch(Set.of("query", "keywords", "searchquery", "naturallanguagequery", "searchtext")::contains);
     }
 
     public record Scored(McpToolCandidate tool, double score) {

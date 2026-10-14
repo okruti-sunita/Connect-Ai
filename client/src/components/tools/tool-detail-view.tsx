@@ -28,6 +28,9 @@ const ToolDetailView = ({tool, catalogItem, busy, onBack, onConnect, onDisconnec
     const [reloadKey, setReloadKey] = useState(0);
     const [replaceOpen, setReplaceOpen] = useState(false);
     const [replacement, setReplacement] = useState('');
+    const [grafanaUrl, setGrafanaUrl] = useState('');
+    const [grafanaToken, setGrafanaToken] = useState('');
+    const [endpointToken, setEndpointToken] = useState('');
     const [replacing, setReplacing] = useState(false);
     const connected = tool.runtimeConnected && tool.status === 'CONNECTED';
 
@@ -49,12 +52,23 @@ const ToolDetailView = ({tool, catalogItem, busy, onBack, onConnect, onDisconnec
     const visible = (capabilities ?? []).filter((c) => `${c.name} ${c.description}`.toLowerCase().includes(query.trim().toLowerCase()));
 
     const replaceCredential = async () => {
-        if (!replacement.trim()) return;
+        if (tool.catalogKey === 'grafana' ? (!grafanaUrl.trim() || !grafanaToken.trim()) : !replacement.trim()) return;
         setReplacing(true);
         try {
             if (tool.runtimeConnected) await toolsApi.disconnect(tool.id);
-            await toolsApi.replaceBearerCredential(tool.id, replacement.trim());
+            if (tool.catalogKey === 'grafana') {
+                await toolsApi.replaceGrafanaCredentials(tool.id, {
+                    grafanaUrl: grafanaUrl.trim(),
+                    serviceAccountToken: grafanaToken.trim(),
+                    endpointToken: endpointToken.trim() || undefined,
+                });
+            } else {
+                await toolsApi.replaceBearerCredential(tool.id, replacement.trim());
+            }
             setReplacement('');
+            setGrafanaUrl('');
+            setGrafanaToken('');
+            setEndpointToken('');
             setReplaceOpen(false);
             const result = await toolsApi.connect(tool.id);
             if (result?.initialized) message.success(`${tool.name} credential replaced and MCP connection verified.`);
@@ -129,7 +143,7 @@ const ToolDetailView = ({tool, catalogItem, busy, onBack, onConnect, onDisconnec
                         </Button>
                     )}
                     {tool.authType === 'BEARER' && (
-                        <Button disabled={busy} onClick={() => setReplaceOpen(true)}>Replace token</Button>
+                        <Button disabled={busy} onClick={() => setReplaceOpen(true)}>{tool.catalogKey === 'grafana' ? 'Update credentials' : 'Replace token'}</Button>
                     )}
                     <Button danger disabled={busy} onClick={onRemove}>Remove</Button>
                 </div>
@@ -158,13 +172,20 @@ const ToolDetailView = ({tool, catalogItem, busy, onBack, onConnect, onDisconnec
                     },
                 ]}
             />
-            <Modal open={replaceOpen} title="Replace bearer token" okText="Save and reconnect"
+            <Modal open={replaceOpen} title={tool.catalogKey === 'grafana' ? 'Update Grafana credentials' : 'Replace bearer token'} okText="Save and reconnect"
                    confirmLoading={replacing} onOk={() => void replaceCredential()}
-                   onCancel={() => { if (!replacing) { setReplaceOpen(false); setReplacement(''); } }}>
-                <p>The previous token cannot be recovered if its encryption key changed. Enter a new token with the required read-only access. It is encrypted by the backend and is never returned to this page.</p>
-                <Input.Password autoComplete="new-password" value={replacement}
-                                onChange={(event) => setReplacement(event.target.value)}
-                                placeholder="Paste a new access token" aria-label="New bearer token"/>
+                   onCancel={() => { if (!replacing) { setReplaceOpen(false); setReplacement(''); setGrafanaUrl(''); setGrafanaToken(''); setEndpointToken(''); } }}>
+                {tool.catalogKey === 'grafana' ? <>
+                    <p>Enter the Grafana instance URL and a new least-privilege service-account token. The MCP endpoint bearer token is separate and optional. Values are encrypted by the backend and never returned to this page.</p>
+                    <Input value={grafanaUrl} onChange={(event) => setGrafanaUrl(event.target.value)} placeholder="https://your-stack.grafana.net" aria-label="Grafana instance URL"/>
+                    <Input.Password autoComplete="new-password" value={grafanaToken} onChange={(event) => setGrafanaToken(event.target.value)} placeholder="New Grafana service-account token" aria-label="New Grafana service-account token"/>
+                    <Input.Password autoComplete="new-password" value={endpointToken} onChange={(event) => setEndpointToken(event.target.value)} placeholder="MCP endpoint bearer token (optional)" aria-label="New MCP endpoint bearer token"/>
+                </> : <>
+                    <p>The previous token cannot be recovered if its encryption key changed. Enter a new token with the required read-only access. It is encrypted by the backend and is never returned to this page.</p>
+                    <Input.Password autoComplete="new-password" value={replacement}
+                                    onChange={(event) => setReplacement(event.target.value)}
+                                    placeholder="Paste a new access token" aria-label="New bearer token"/>
+                </>}
             </Modal>
         </div>
     );

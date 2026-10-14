@@ -25,6 +25,7 @@ const EvidenceDrawer = ({ item, onClose }: Props) => (
                 <div className="drawer-pills">
                     <span className="pill">Source: {SOURCE_LABEL[item.source]}</span>
                     {item.confidence != null && <span className="pill blue">Confidence {item.confidence}%</span>}
+                    <span className="pill">Coverage: {item.completeness?.toLowerCase() ?? "unknown"}</span>
                 </div>
 
                 <h4>Tool output</h4>

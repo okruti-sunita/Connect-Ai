@@ -9,6 +9,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -67,6 +68,87 @@ class ControlledAgentExecutorTest {
     }
 
     @Test
+    void rejectsAPlannerSelectionOutsideTheLiveServerAndToolCatalog() {
+        AtomicInteger calls = new AtomicInteger();
+        ToolExecutionPort port = request -> {
+            calls.incrementAndGet();
+            return new ToolExecutionResult(request.toolName(), false, List.of(), null);
+        };
+        ToolSelectionPlan wrongServer = new ToolSelectionPlan(UUID.randomUUID(), "get_me", Map.of(), "stale");
+
+        AgentExecutionState state = executor(scripted(PlannerDecision.run(wrongServer)), port, 3)
+                .execute("q", TOOLS);
+
+        assertThat(state.status()).isEqualTo(AgentExecutionStatus.FAILED);
+        assertThat(state.stopReason()).contains("not available").contains("No tool was executed");
+        assertThat(state.steps()).isEmpty();
+        assertThat(calls).hasValue(0);
+    }
+
+    @Test
+    void explicitProviderIsAConstraintForEveryDynamicPlanner() {
+        UUID github = UUID.fromString("00000000-0000-0000-0000-000000000002");
+        UUID linear = UUID.fromString("00000000-0000-0000-0000-000000000003");
+        McpToolCandidate githubTool = new McpToolCandidate(github, "list_issues", "", "List issues", Map.of(),
+                true, "GitHub", "github");
+        McpToolCandidate linearTool = new McpToolCandidate(linear, "list_issues", "", "List issues", Map.of(),
+                true, "Linear", "linear");
+        List<List<McpToolCandidate>> plannerCatalogs = new ArrayList<>();
+        AtomicInteger plannerCalls = new AtomicInteger();
+        AtomicInteger executedServer = new AtomicInteger();
+        DynamicToolPlanner planner = new DynamicToolPlanner() {
+            @Override
+            public java.util.Optional<ToolSelectionPlan> plan(String q, List<McpToolCandidate> t) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public PlannerDecision decide(String q, List<McpToolCandidate> t, AgentExecutionState s) {
+                plannerCatalogs.add(List.copyOf(t));
+                return plannerCalls.getAndIncrement() == 0
+                        ? PlannerDecision.run(new ToolSelectionPlan(linear, "list_issues", Map.of(), "Linear requested"))
+                        : PlannerDecision.finish("done");
+            }
+        };
+        ToolExecutionPort executionPort = request -> {
+            if (request.serverId().equals(linear)) executedServer.set(3);
+            if (request.serverId().equals(github)) executedServer.set(2);
+            return new ToolExecutionResult(request.toolName(), false,
+                    List.of(new ToolExecutionContent("text", "[]")), null);
+        };
+
+        AgentExecutionState state = executor(planner, executionPort, 2)
+                .execute("List my tasks on Linear", List.of(githubTool, linearTool));
+
+        assertThat(plannerCatalogs).isNotEmpty().allSatisfy(catalog -> assertThat(catalog).containsExactly(linearTool));
+        assertThat(executedServer).hasValue(3);
+        assertThat(state.steps()).hasSize(1);
+    }
+
+    @Test
+    void validatesArgumentsAgainstTheLiveSchemaBeforeExternalExecutionAndCanRecover() {
+        AtomicInteger calls = new AtomicInteger();
+        ToolExecutionPort port = request -> {
+            calls.incrementAndGet();
+            return new ToolExecutionResult(request.toolName(), false, List.of(), null);
+        };
+        McpToolCandidate strict = new McpToolCandidate(SERVER, "search", "", "Search",
+                Map.of("type", "object", "required", List.of("query"),
+                        "properties", Map.of("query", Map.of("type", "string")),
+                        "additionalProperties", false));
+        List<McpToolCandidate> catalog = List.of(strict);
+
+        AgentExecutionState state = executor(scripted(run("search", Map.of()), run("search", Map.of("query", "incident")),
+                PlannerDecision.finish("done")), port, 4).execute("q", catalog);
+
+        assertThat(state.status()).isEqualTo(AgentExecutionStatus.COMPLETED);
+        assertThat(state.steps()).extracting(AgentExecutionStep::status)
+                .containsExactly(AgentStepStatus.FAILED, AgentStepStatus.SUCCESS);
+        assertThat(state.steps().get(0).errorMessage()).contains("rejected before external execution").contains("query is required");
+        assertThat(calls).hasValue(1);
+    }
+
+    @Test
     void finishAfterEvidenceCompletes() {
         List<AgentExecutionStep> seen = new ArrayList<>();
         AgentExecutionState state = executor(scripted(run("get_me", Map.of()), PlannerDecision.finish("enough")), port(), 5)
@@ -79,13 +161,54 @@ class ControlledAgentExecutorTest {
     }
 
     @Test
-    void plannerErrorFailsButKeepsEarlierSteps() {
+    void plannerErrorFailsSafelyButKeepsEarlierSteps() {
         AgentExecutionState state = executor(scripted(run("get_me", Map.of()),
                 new IllegalStateException("model unavailable")), port(), 5).execute("q", TOOLS);
 
         assertThat(state.status()).isEqualTo(AgentExecutionStatus.FAILED);
-        assertThat(state.stopReason()).contains("Planner error").contains("model unavailable");
+        assertThat(state.stopReason()).contains("planner failed").doesNotContain("model unavailable");
+        assertThat(state.failureCategory()).isEqualTo(AgentFailureCategory.PLANNER_FAILURE);
         assertThat(state.steps()).hasSize(1);
+    }
+
+    @Test
+    void rateLimitAfterOneSuccessfulSlackSearchPreservesEvidenceAndRetryHint() {
+        McpToolCandidate slackSearch = new McpToolCandidate(SERVER, "search_messages", "", "Search Slack messages",
+                Map.of(), true, "Slack - Test", "slack");
+        AgentExecutionState state = executor(scripted(run("search_messages", Map.of()),
+                new PlannerFailureException(AgentFailureCategory.PROVIDER_RATE_LIMIT,
+                        "LLM provider rate limit (HTTP 429). Retry after 17 seconds.", 17L)), port(), 5)
+                .execute("Search Slack messages", List.of(slackSearch));
+
+        assertThat(state.steps()).hasSize(1);
+        assertThat(state.hasSuccessfulStep()).isTrue();
+        assertThat(state.status()).isEqualTo(AgentExecutionStatus.FAILED);
+        assertThat(state.failureCategory()).isEqualTo(AgentFailureCategory.PROVIDER_RATE_LIMIT);
+        assertThat(state.stopReason()).contains("429", "17 seconds");
+    }
+
+    @Test
+    void rateLimitAfterTwoReadOnlyStepsPreservesBothSuccessfulSteps() {
+        AgentExecutionState state = executor(scripted(run("get_me", Map.of()), run("search", Map.of()),
+                new PlannerFailureException(AgentFailureCategory.PROVIDER_RATE_LIMIT,
+                        "LLM provider rate limit (HTTP 429).", null)), port(), 5)
+                .execute("q", TOOLS);
+
+        assertThat(state.steps()).hasSize(2).extracting(AgentExecutionStep::status)
+                .containsExactly(AgentStepStatus.SUCCESS, AgentStepStatus.SUCCESS);
+        assertThat(state.status()).isEqualTo(AgentExecutionStatus.FAILED);
+        assertThat(state.failureCategory()).isEqualTo(AgentFailureCategory.PROVIDER_RATE_LIMIT);
+    }
+
+    @Test
+    void plannerFailureBeforeExecutionHasNoEvidenceAndSafeFailureCategory() {
+        AgentExecutionState state = executor(scripted(new PlannerFailureException(
+                AgentFailureCategory.PLANNER_FAILURE, "The investigation planner failed before completion.", null)),
+                port(), 5).execute("q", TOOLS);
+
+        assertThat(state.steps()).isEmpty();
+        assertThat(state.status()).isEqualTo(AgentExecutionStatus.FAILED);
+        assertThat(state.failureCategory()).isEqualTo(AgentFailureCategory.PLANNER_FAILURE);
     }
 
     @Test
@@ -166,5 +289,31 @@ class ControlledAgentExecutorTest {
 
         assertThat(state.status()).isEqualTo(AgentExecutionStatus.STOPPED);
         assertThat(state.stopReason()).contains("Time budget");
+    }
+
+    @Test
+    void explicitNextCursorIsFetchedDeterministicallyBeforePlannerCanFinish() {
+        McpToolCandidate search = new McpToolCandidate(SERVER, "search_messages", "Search messages",
+                "Search messages", Map.of("type", "object", "properties", Map.of(
+                "query", Map.of("type", "string"), "cursor", Map.of("type", "string"))),
+                true, "Slack", "slack");
+        List<Map<String, Object>> arguments = new ArrayList<>();
+        AtomicInteger invocation = new AtomicInteger();
+        ToolExecutionPort provider = request -> {
+            arguments.add(request.arguments());
+            return invocation.getAndIncrement() == 0
+                    ? new ToolExecutionResult(request.toolName(), false,
+                    List.of(new ToolExecutionContent("text", "{\"next_cursor\":\"cursor-2\"}")), null)
+                    : new ToolExecutionResult(request.toolName(), false,
+                    List.of(new ToolExecutionContent("text", "{\"messages\":[{\"id\":\"m2\"}]}")), null);
+        };
+
+        AgentExecutionState state = executor(scripted(run("search_messages", Map.of("query", "pizza")),
+                PlannerDecision.finish("enough evidence")), provider, 5)
+                .execute("Search Slack for pizza", List.of(search));
+
+        assertThat(state.steps()).hasSize(2);
+        assertThat(arguments).containsExactly(Map.of("query", "pizza"), Map.of("query", "pizza", "cursor", "cursor-2"));
+        assertThat(state.status()).isEqualTo(AgentExecutionStatus.COMPLETED);
     }
 }

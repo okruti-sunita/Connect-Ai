@@ -29,12 +29,33 @@ docker compose up -d
 ollama pull qwen3:1.7b
 ollama serve            # if it is not already running as a service
 
-# 3. Backend (profile "local" is active by default: Ollama + MCP tools)
-cd server && mvn spring-boot:run
+# 3. Backend OAuth settings (one-time; edit the ignored file with your own OAuth app values)
+cp server/config-example/application.yml server/config/application.yml
+# Edit server/config/application.yml and fill the provider client IDs and secrets you use.
 
-# 4. Frontend (http://localhost:5173, API proxied to :8080)
-cd client && npm ci && npm run dev
 ```
+
+4. Start the backend from Windows PowerShell. The helper restores the protected local encryption key and
+   starts Spring Boot with `server/` as its working directory:
+
+   ```powershell
+   cd server
+   .\start-local-google-drive.ps1
+   ```
+
+5. Start the frontend in another terminal:
+
+   ```bash
+   cd client && npm ci && npm run dev
+   ```
+
+The local OAuth file is git-ignored and loaded by Spring Boot from `server/config/application.yml` when
+the backend runs with `server/` as its working directory. It contains blank fields for GitHub, Google
+Drive, Slack, and Grafana. Fill only the providers you use; the corresponding sign-in buttons stay
+unconfigured while their fields are blank. The file is not overwritten on later runs. The existing
+`server/start-local-google-drive.ps1` helper can still be used to supply the persistent encryption key.
+When this local file is present, edit its provider values directly; they take precedence over the OAuth
+environment-variable placeholders listed below.
 
 Then open http://localhost:5173 → **Connections** → add the GitHub MCP server → **Investigations**.
 

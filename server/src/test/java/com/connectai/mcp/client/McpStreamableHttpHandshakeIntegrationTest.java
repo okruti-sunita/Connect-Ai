@@ -20,6 +20,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -32,6 +33,7 @@ class McpStreamableHttpHandshakeIntegrationTest {
     private HttpServer server;
     private ExecutorService executor;
     private McpSyncClient client;
+    private final AtomicInteger mcpRequests = new AtomicInteger();
 
     @BeforeEach
     void startServer() throws IOException {
@@ -40,6 +42,12 @@ class McpStreamableHttpHandshakeIntegrationTest {
                 0);
 
         server.createContext("/mcp", this::handleMcpRequest);
+        server.createContext("/redirect", exchange -> {
+            exchange.getResponseHeaders().set("Location", "http://localhost:"
+                    + server.getAddress().getPort() + "/mcp");
+            exchange.sendResponseHeaders(307, -1);
+            exchange.close();
+        });
 
         executor = Executors.newCachedThreadPool();
         server.setExecutor(executor);
@@ -105,8 +113,28 @@ class McpStreamableHttpHandshakeIntegrationTest {
         assertTrue(client.isInitialized());
     }
 
+    @Test
+    void mcpEndpointRedirectIsRejectedWithoutFollowingIt() {
+        EMcpServer serverConfig = new EMcpServer(
+                "redirecting-mcp",
+                McpTransportType.STREAMABLE_HTTP,
+                "http://localhost:" + server.getAddress().getPort() + "/redirect",
+                McpAuthType.NONE,
+                null,
+                true);
+        McpClientFactory factory = new McpClientFactory(
+                new SecretEncryptionService("integration-test-encryption-key-long-enough-123456"),
+                10,
+                5);
+        client = factory.create(serverConfig);
+
+        org.junit.jupiter.api.Assertions.assertThrows(RuntimeException.class, client::initialize);
+        assertEquals(0, mcpRequests.get(), "the redirected MCP endpoint must never be requested");
+    }
+
     private void handleMcpRequest(
             HttpExchange exchange) throws IOException {
+        mcpRequests.incrementAndGet();
 
         String requestBody = new String(
                 exchange.getRequestBody().readAllBytes(),

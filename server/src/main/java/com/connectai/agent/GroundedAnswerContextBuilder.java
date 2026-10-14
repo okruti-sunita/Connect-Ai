@@ -39,6 +39,7 @@ public class GroundedAnswerContextBuilder {
         List<String> qualityWarnings = new ArrayList<>();
         Map<String, String> pendingPages = new HashMap<>();
         Set<String> recordKeys = new HashSet<>();
+        Set<String> emittedRecordKeys = new HashSet<>();
         boolean hasDirectTotal = false;
         boolean hasExplicitPageEnd = false;
         boolean duplicateRecords = false;
@@ -53,13 +54,13 @@ public class GroundedAnswerContextBuilder {
             }
 
             if (evidence.size() >= MAX_EVIDENCE_ITEMS || totalChars >= MAX_TOTAL_EVIDENCE_CHARS) {
+                qualityWarnings.add("Evidence capture reached its per-investigation size limit; later tool results were omitted.");
                 break;
             }
 
-            String content = renderResult(step.result());
-            if (content.isBlank()) {
-                continue;
-            }
+            String content = renderResult(step.result(), step, emittedRecordKeys);
+            boolean emptyResult = content.isBlank() || isExplicitEmptyResult(step.result());
+            if (content.isBlank()) content = "The tool call succeeded and returned no content.";
 
             PageMetadata pagination = new PageMetadata();
             JsonNode structured = step.result().structuredContent() == null ? null
@@ -105,12 +106,19 @@ public class GroundedAnswerContextBuilder {
                 continue;
             }
 
+            EvidenceCompleteness completeness = boundedContent.length() < content.length() || pagination.incomplete
+                    ? EvidenceCompleteness.TRUNCATED
+                    : pagination.nextCursor != null || pagination.hasMore
+                    ? EvidenceCompleteness.PARTIAL
+                    : emptyResult ? EvidenceCompleteness.EMPTY
+                    : pagination.pageEnd ? EvidenceCompleteness.COMPLETE : EvidenceCompleteness.UNKNOWN;
             evidence.add(new GroundedEvidence(
                     "E" + (evidence.size() + 1),
                     step.stepNumber(),
                     step.plan().serverId(),
                     step.plan().toolName(),
-                    boundedContent));
+                    boundedContent,
+                    completeness));
             totalChars += boundedContent.length();
         }
 
@@ -224,6 +232,41 @@ public class GroundedAnswerContextBuilder {
         return false;
     }
 
+    private static boolean isExplicitEmptyResult(ToolExecutionResult result) {
+        JsonNode structured = result.structuredContent() == null ? null : MAPPER.valueToTree(result.structuredContent());
+        if (isEmptyRecordCollection(structured)) return true;
+        if (result.content() == null) return false;
+        for (ToolExecutionContent item : result.content()) {
+            if (item == null || item.text() == null) continue;
+            String text = item.text().toLowerCase(Locale.ROOT);
+            if (text.contains("no results found") || text.contains("no matching records")
+                    || text.contains("no matching messages") || text.contains("no issues found")) return true;
+            try {
+                if (isEmptyRecordCollection(MAPPER.readTree(item.text()))) return true;
+            } catch (Exception ignored) {
+                // Plain-text provider results are checked by their explicit empty-result wording above.
+            }
+        }
+        return false;
+    }
+
+    private static boolean isEmptyRecordCollection(JsonNode node) {
+        if (node == null) return false;
+        if (node.isObject()) {
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                var field = fields.next();
+                String key = field.getKey().replaceAll("[_-]", "").toLowerCase(Locale.ROOT);
+                if (Set.of("results", "messages", "issues", "items", "records", "nodes").contains(key)
+                        && field.getValue().isArray() && field.getValue().isEmpty()) return true;
+                if (isEmptyRecordCollection(field.getValue())) return true;
+            }
+        } else if (node.isArray()) {
+            for (JsonNode child : node) if (isEmptyRecordCollection(child)) return true;
+        }
+        return false;
+    }
+
     private static String paginationScope(AgentExecutionStep step) {
         Map<String, Object> base = new TreeMap<>();
         step.plan().arguments().forEach((key, value) -> {
@@ -251,8 +294,10 @@ public class GroundedAnswerContextBuilder {
         private String nextCursor;
     }
 
-    private static String renderResult(ToolExecutionResult result) {
+    private static String renderResult(ToolExecutionResult result, AgentExecutionStep step,
+                                       Set<String> emittedRecordKeys) {
         StringBuilder text = new StringBuilder();
+        String recordScope = step.plan().serverId() + "|" + step.plan().toolName() + "|";
 
         if (result.content() != null) {
             result.content().forEach(content -> {
@@ -260,13 +305,14 @@ public class GroundedAnswerContextBuilder {
                     return;
                 }
                 if (content.text() != null && !content.text().isBlank()) {
+                    String rendered = deduplicateJson(content.text(), recordScope, emittedRecordKeys);
                     if (!text.isEmpty()) {
                         text.append("\n");
                     }
                     text.append("[")
                             .append(content.type() == null ? "content" : content.type())
                             .append("] ")
-                            .append(JsonCompactor.compact(content.text()));
+                            .append(JsonCompactor.compact(rendered));
                 }
             });
         }
@@ -275,11 +321,42 @@ public class GroundedAnswerContextBuilder {
             if (!text.isEmpty()) {
                 text.append("\n");
             }
+            JsonNode structured = MAPPER.valueToTree(result.structuredContent());
+            JsonNode unique = deduplicateRecords(structured, recordScope, emittedRecordKeys);
             text.append("[structured] ")
-                    .append(String.valueOf(result.structuredContent()));
+                    .append(unique.equals(structured) ? String.valueOf(result.structuredContent()) : unique);
         }
 
         return text.toString().trim();
+    }
+
+    private static String deduplicateJson(String value, String recordScope, Set<String> emittedRecordKeys) {
+        try {
+            JsonNode parsed = MAPPER.readTree(value);
+            return MAPPER.writeValueAsString(deduplicateRecords(parsed, recordScope, emittedRecordKeys));
+        } catch (Exception ignored) {
+            return value;
+        }
+    }
+
+    private static JsonNode deduplicateRecords(JsonNode node, String recordScope, Set<String> emittedRecordKeys) {
+        if (node == null) return null;
+        if (node.isArray()) {
+            var unique = MAPPER.createArrayNode();
+            for (JsonNode child : node) {
+                String identity = child.isObject() ? recordIdentity(child) : null;
+                if (identity != null && !emittedRecordKeys.add(recordScope + identity)) continue;
+                unique.add(deduplicateRecords(child, recordScope, emittedRecordKeys));
+            }
+            return unique;
+        }
+        if (node.isObject()) {
+            var unique = MAPPER.createObjectNode();
+            node.fields().forEachRemaining(field -> unique.set(field.getKey(),
+                    deduplicateRecords(field.getValue(), recordScope, emittedRecordKeys)));
+            return unique;
+        }
+        return node.deepCopy();
     }
 
     private static String truncate(String value, int maxChars) {

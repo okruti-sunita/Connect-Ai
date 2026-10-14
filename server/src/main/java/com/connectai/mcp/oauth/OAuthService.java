@@ -58,12 +58,12 @@ public class OAuthService {
     public record Attempt(String id, UUID serverId, String providerId, AttemptStatus status, String message) { }
 
     public record ProviderInfo(String id, String displayName, boolean configured, List<String> scopes,
-                               String redirectUri) { }
+                               String redirectUri, String configurationIssue) { }
 
     public record Started(String attemptId, String authorizationUrl, String cookieName, String cookieValue) { }
 
-    private record Pending(UUID serverId, String providerId, String verifier, String attemptId,
-                           String browserBindingHash, Instant createdAt) { }
+    private record Pending(UUID serverId, String providerId, String verifier, String attemptId, String redirectUri,
+                           String frontendOrigin, String browserBindingHash, Instant createdAt) { }
 
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final Duration REFRESH_MARGIN = Duration.ofSeconds(30);
@@ -94,15 +94,82 @@ public class OAuthService {
 
     public List<ProviderInfo> providers() {
         return properties.getProviders().entrySet().stream()
-                .map(e -> new ProviderInfo(e.getKey(),
-                        e.getValue().getDisplayName() == null ? e.getKey() : e.getValue().getDisplayName(),
-                        e.getValue().isConfigured(), scopes(e.getValue()), properties.getRedirectUri()))
+                .map(e -> {
+                    String issue = configurationIssue(e.getKey(), e.getValue());
+                    return new ProviderInfo(e.getKey(),
+                            e.getValue().getDisplayName() == null ? e.getKey() : e.getValue().getDisplayName(),
+                            issue == null, scopes(e.getValue()), infoRedirectUri(e.getKey(), e.getValue()), issue);
+                })
                 .toList();
+    }
+
+    /** Reports readiness only when the server has credentials and a usable OAuth configuration. */
+    private String configurationIssue(String providerId, OAuthProperties.Provider provider) {
+        if (!provider.isConfigured()) {
+            return "OAuth sign-in is missing server settings: "
+                    + String.join(", ", missingOAuthSettings(providerId, provider)) + ".";
+        }
+        try {
+            String redirectUri = effectiveRedirectUri(provider);
+            if (provider.isRequireHttpsRedirect() && (provider.getRedirectUri() == null || provider.getRedirectUri().isBlank())) {
+                return "A provider-specific HTTPS redirect URI must be configured on this server.";
+            }
+            validateRedirectUri(redirectUri);
+            if (provider.isRequireHttpsRedirect() && !URI.create(redirectUri).getScheme().equalsIgnoreCase("https")) {
+                return "This provider requires an HTTPS redirect URI. Configure its provider-specific callback URL on this server.";
+            }
+            validateProvider(providerId, provider);
+            return null;
+        } catch (ResponseStatusException exception) {
+            return exception.getReason() == null
+                    ? "The OAuth provider configuration is invalid. Check the server settings."
+                    : exception.getReason();
+        }
     }
 
     /** Safe callback URI for setup guidance; contains no credentials. */
     public String redirectUri() {
         return properties.getRedirectUri();
+    }
+
+    /** Callback URI for the provider attached to a saved connection. */
+    public String redirectUriForConnection(UUID serverId) {
+        EMcpServer server = repository.findById(serverId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "MCP connection not found"));
+        OAuthProperties.Provider provider = properties.getProviders().get(server.getOauthProvider());
+        if (provider == null) throw new ResponseStatusException(HttpStatus.CONFLICT, "OAuth provider is not configured");
+        return effectiveRedirectUri(provider);
+    }
+
+    /** Safe callback URI bound to the pending state, or the default URI for invalid states. */
+    public String redirectUriForState(String state) {
+        Pending started = state == null ? null : pending.get(state);
+        return started == null ? properties.getRedirectUri() : started.redirectUri();
+    }
+
+    /** Frontend origin bound to an active state, used only as a strict postMessage target. */
+    public String frontendOriginForState(String state) {
+        Pending started = state == null ? null : pending.get(state);
+        return started == null ? null : started.frontendOrigin();
+    }
+
+    public String attemptIdForState(String state) {
+        Pending started = state == null ? null : pending.get(state);
+        return started == null ? null : started.attemptId();
+    }
+
+    private String infoRedirectUri(String providerId, OAuthProperties.Provider provider) {
+        if (provider.isRequireHttpsRedirect() && (provider.getRedirectUri() == null || provider.getRedirectUri().isBlank())) return null;
+        try {
+            return effectiveRedirectUri(provider);
+        } catch (RuntimeException exception) {
+            return null;
+        }
+    }
+
+    private String effectiveRedirectUri(OAuthProperties.Provider provider) {
+        return provider.getRedirectUri() == null || provider.getRedirectUri().isBlank()
+                ? properties.getRedirectUri() : provider.getRedirectUri().trim();
     }
 
     /** Validates a provider id for a new OAUTH connection. */
@@ -113,13 +180,27 @@ public class OAuthService {
         }
         if (!provider.isConfigured()) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "Sign-in with " + displayName(providerId, provider)
-                    + " is not configured on this server. Set its OAuth client id and secret (see README), or use an access token.");
+                    + " is not configured on this server. Missing settings: "
+                    + String.join(", ", missingOAuthSettings(providerId, provider)) + ".");
         }
-        validateRedirectUri(properties.getRedirectUri());
+        String redirectUri = effectiveRedirectUri(provider);
+        if (provider.isRequireHttpsRedirect() && (provider.getRedirectUri() == null || provider.getRedirectUri().isBlank())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "A provider-specific HTTPS redirect URI must be configured on this server.");
+        }
+        validateRedirectUri(redirectUri);
+        if (provider.isRequireHttpsRedirect() && !URI.create(redirectUri).getScheme().equalsIgnoreCase("https")) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This provider requires an HTTPS redirect URI. Configure its provider-specific callback URL on this server.");
+        }
         validateProvider(providerId, provider);
     }
 
     public Started start(UUID serverId) {
+        return start(serverId, properties.getFrontendOrigin());
+    }
+
+    public Started start(UUID serverId, String frontendOrigin) {
         purgeExpired();
         if (pending.size() >= 1000) {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
@@ -134,25 +215,30 @@ public class OAuthService {
         String providerId = server.getOauthProvider();
         requireConfigured(providerId);
         OAuthProperties.Provider provider = properties.getProviders().get(providerId);
+        String redirectUri = effectiveRedirectUri(provider);
 
         String state = randomToken();
         String attemptId = randomToken();
         String cookieName = "connectai_oauth_" + state;
         String cookieValue = randomToken();
         String verifier = randomToken() + randomToken();
-        pending.put(state, new Pending(serverId, providerId, verifier, attemptId, sha256(cookieValue), Instant.now()));
+        pending.put(state, new Pending(serverId, providerId, verifier, attemptId, redirectUri,
+                frontendOrigin, sha256(cookieValue), Instant.now()));
         outcomes.put(attemptId, new Attempt(attemptId, serverId, providerId, AttemptStatus.PENDING, "Waiting for sign-in"));
         outcomeCreatedAt.put(attemptId, Instant.now());
 
         Map<String, String> params = new LinkedHashMap<>();
         params.put("response_type", "code");
         params.put("client_id", provider.getClientId());
-        params.put("redirect_uri", properties.getRedirectUri());
+        params.put("redirect_uri", redirectUri);
         if (!provider.getScopes().isBlank()) {
             params.put("scope", provider.getScopes());
         }
         if (provider.getAccessType() != null && !provider.getAccessType().isBlank()) {
             params.put("access_type", provider.getAccessType());
+        }
+        if (provider.getResource() != null && !provider.getResource().isBlank()) {
+            params.put("resource", provider.getResource());
         }
         params.putAll(provider.getAuthorizationParameters());
         params.put("state", state);
@@ -201,8 +287,11 @@ public class OAuthService {
             Map<String, String> body = new LinkedHashMap<>();
             body.put("grant_type", "authorization_code");
             body.put("code", code);
-            body.put("redirect_uri", properties.getRedirectUri());
+            body.put("redirect_uri", started.redirectUri());
             OAuthProperties.Provider provider = properties.getProviders().get(started.providerId());
+            if (provider.getResource() != null && !provider.getResource().isBlank()) {
+                body.put("resource", provider.getResource());
+            }
             if (provider.isPkce()) {
                 body.put("code_verifier", started.verifier());
             }
@@ -316,6 +405,9 @@ public class OAuthService {
             Map<String, String> body = new LinkedHashMap<>();
             body.put("grant_type", "refresh_token");
             body.put("refresh_token", encryption.decrypt(server.getEncryptedRefreshToken()));
+            if (provider.getResource() != null && !provider.getResource().isBlank()) {
+                body.put("resource", provider.getResource());
+            }
             try {
                 storeTokens(server, requestToken(provider, body), true);
                 log.info("OAuth token refreshed: serverId={}", server.getId());
@@ -337,13 +429,28 @@ public class OAuthService {
     // ---------------------------------------------------------------- internals
 
     private void storeTokens(EMcpServer server, JsonNode token, boolean refreshing) {
+        if (token.has("ok") && !token.path("ok").asBoolean(false)) {
+            throw new OAuthException("The provider rejected the sign-in" + safeErrorCode(token.path("error").asText()) + ".");
+        }
         String access = token.path("access_token").asText("");
         if (access.isBlank()) {
             throw new OAuthException("The provider returned no access token.");
         }
         String tokenType = token.path("token_type").asText("");
-        if (!tokenType.isBlank() && !"bearer".equalsIgnoreCase(tokenType)) {
-            throw new OAuthException("The provider returned an unsupported token type.");
+        String providerId = server.getOauthProvider();
+        boolean slackUserToken = "slack".equalsIgnoreCase(providerId);
+        String expectedTokenType = slackUserToken
+                ? "user" // Slack's oauth.v2.user.access endpoint issues user-scoped tokens.
+                : properties.getProviders().get(providerId).getExpectedTokenType();
+        // Some OAuth-compatible responses label an access token "Bearer" even when the
+        // Slack user-only endpoint issues it. The authorization URL and scopes are user-only;
+        // continue to reject bot/unknown types and verify the credential with the MCP handshake.
+        boolean supportedTokenType = tokenType.isBlank()
+                || (slackUserToken && "bearer".equalsIgnoreCase(tokenType))
+                || (expectedTokenType == null || expectedTokenType.isBlank()
+                    ? "bearer".equalsIgnoreCase(tokenType) : expectedTokenType.equalsIgnoreCase(tokenType));
+        if (!supportedTokenType) {
+            throw new OAuthException("The provider returned an unsupported token type (" + safeTokenType(tokenType) + ").");
         }
         String refresh = token.path("refresh_token").asText("");
         long expiresIn = token.path("expires_in").asLong(0);
@@ -445,11 +552,38 @@ public class OAuthService {
         return provider.getDisplayName() == null ? id : provider.getDisplayName();
     }
 
+    private static List<String> missingOAuthSettings(String providerId, OAuthProperties.Provider provider) {
+        List<String> missing = new java.util.ArrayList<>();
+        if ("grafana".equalsIgnoreCase(providerId)) {
+            if (blank(provider.getClientId())) missing.add("GRAFANA_OAUTH_CLIENT_ID");
+            if (blank(provider.getClientSecret())) missing.add("GRAFANA_OAUTH_CLIENT_SECRET");
+            if (blank(provider.getAuthorizeUrl())) missing.add("GRAFANA_OAUTH_AUTHORIZE_URL");
+            if (blank(provider.getTokenUrl())) missing.add("GRAFANA_OAUTH_TOKEN_URL");
+            return List.copyOf(missing);
+        }
+        if (blank(provider.getClientId())) missing.add("OAuth client ID");
+        if (blank(provider.getClientSecret())) missing.add("OAuth client secret");
+        if (blank(provider.getAuthorizeUrl())) missing.add("authorization URL");
+        if (blank(provider.getTokenUrl())) missing.add("token URL");
+        return List.copyOf(missing);
+    }
+
+    private static boolean blank(String value) {
+        return value == null || value.isBlank();
+    }
+
     private void validateProvider(String id, OAuthProperties.Provider provider) {
+        if ("grafana".equalsIgnoreCase(id) && (provider.getScopes() == null || provider.getScopes().isBlank())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "Grafana OAuth scopes are not configured. Set GRAFANA_OAUTH_SCOPES to the generated scopes from the registered Grafana OAuth client.");
+        }
         validateEndpoint(provider.getAuthorizeUrl(), "authorization", id);
         validateEndpoint(provider.getTokenUrl(), "token", id);
         if (provider.getRevocationUrl() != null && !provider.getRevocationUrl().isBlank()) {
             validateEndpoint(provider.getRevocationUrl(), "revocation", id);
+        }
+        if (provider.getResource() != null && !provider.getResource().isBlank()) {
+            validateEndpoint(provider.getResource(), "resource", id);
         }
         String authentication = provider.getClientAuthentication();
         if (!"client_secret_post".equalsIgnoreCase(authentication)
@@ -512,7 +646,7 @@ public class OAuthService {
 
     private static List<String> scopes(OAuthProperties.Provider provider) {
         if (provider.getScopes() == null || provider.getScopes().isBlank()) return List.of();
-        return List.of(provider.getScopes().trim().split("\\s+"));
+        return List.of(provider.getScopes().trim().split("[\\s,]+"));
     }
 
     private static String safeErrorCode(String error) {
@@ -520,9 +654,18 @@ public class OAuthService {
         return switch (error) {
             case "access_denied", "invalid_request", "unauthorized_client", "unsupported_response_type",
                     "invalid_scope", "server_error", "temporarily_unavailable", "invalid_grant",
-                    "invalid_client", "bad_verification_code" -> " (" + error + ")";
+                    "invalid_client", "invalid_client_id", "bad_client_secret", "invalid_code",
+                    "bad_redirect_uri", "token_expired", "token_revoked", "no_scopes", "no_user_scopes",
+                    "bad_verification_code" -> " (" + error + ")";
             default -> "";
         };
+    }
+
+    /** Token type is response metadata, but restrict it before showing in diagnostics. */
+    private static String safeTokenType(String tokenType) {
+        if (tokenType == null || tokenType.isBlank()) return "missing";
+        String safe = tokenType.replaceAll("[^A-Za-z0-9._-]", "");
+        return safe.isEmpty() ? "unrecognized" : safe.substring(0, Math.min(safe.length(), 32));
     }
 
     private static String appendQuery(String endpoint, String query) {

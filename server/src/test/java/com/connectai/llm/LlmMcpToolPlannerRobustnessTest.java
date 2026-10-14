@@ -77,7 +77,9 @@ class LlmMcpToolPlannerRobustnessTest {
                 "Get details of the authenticated GitHub user.", Map.of("type", "object", "properties", Map.of())));
         tools.add(new McpToolCandidate(SERVER, "search_users", "",
                 "Find GitHub users by username.", Map.of("type", "object",
-                "properties", Map.of("query", Map.of("type", "string")), "required", List.of("query"))));
+                "properties", Map.of("query", Map.of("type", "string"),
+                        "sort", Map.of("type", "string"), "order", Map.of("type", "string")),
+                "required", List.of("query"))));
         for (int i = 0; i < 40; i++) {
             tools.add(new McpToolCandidate(SERVER, "workflow_tool_" + i, "",
                     "Trigger GitHub Actions workflow " + i, Map.of("type", "object")));
@@ -361,6 +363,19 @@ class LlmMcpToolPlannerRobustnessTest {
     }
 
     @Test
+    void doesNotRetryProviderRateLimitAsMalformedOutput() {
+        SequenceLlm llm = new SequenceLlm().thenFail(
+                "Groq HTTP 429: {\"organization\":\"org-private\",\"message\":\"rate limit\"}");
+
+        assertThatThrownBy(() -> new LlmMcpToolPlanner(llm, 8, 3)
+                .decide(QUESTION, catalog(), AgentExecutionState.initial(QUESTION)))
+                .isInstanceOf(com.connectai.agent.PlannerFailureException.class)
+                .hasMessageContaining("LLM provider rate limit (HTTP 429)")
+                .satisfies(error -> assertThat(error.getMessage()).doesNotContain("org-private"));
+        assertThat(llm.prompts).hasSize(1);
+    }
+
+    @Test
     void repairsMissingRequiredArgument() {
         SequenceLlm llm = new SequenceLlm()
                 .then("{\"action\":\"search_users\",\"arguments\":{},\"reason\":\"find\"}")
@@ -382,9 +397,9 @@ class LlmMcpToolPlannerRobustnessTest {
 
         assertThatThrownBy(() -> new LlmMcpToolPlanner(llm, 8, 3)
                 .decide(QUESTION, catalog(), AgentExecutionState.initial(QUESTION)))
-                .isInstanceOf(LlmException.class)
-                .hasMessageContaining("after 3 attempts")
-                .hasMessageContaining("T99");
+                .isInstanceOf(com.connectai.agent.PlannerFailureException.class)
+                .hasMessageContaining("after bounded retries")
+                .hasMessageNotContaining("T99");
         assertThat(llm.prompts).hasSize(3);
     }
 
@@ -395,7 +410,8 @@ class LlmMcpToolPlannerRobustnessTest {
 
         assertThatThrownBy(() -> new LlmMcpToolPlanner(llm, 8, 1)
                 .decide("search github users", catalog(), AgentExecutionState.initial("q")))
-                .hasMessageContaining("arguments.query must be string");
+                .isInstanceOf(com.connectai.agent.PlannerFailureException.class)
+                .hasMessageContaining("after bounded retries");
     }
 
     @Test

@@ -52,6 +52,32 @@ connectai:
         access-type: offline
         revocation-url: https://oauth2.googleapis.com/revoke
         pkce: true
+      slack:
+        display-name: Slack
+        authorize-url: https://slack.com/oauth/v2_user/authorize
+        token-url: https://slack.com/api/oauth.v2.user.access
+        client-id: ${SLACK_OAUTH_CLIENT_ID:}
+        client-secret: ${SLACK_OAUTH_CLIENT_SECRET:}
+        # Read-only user access for message search and channel/thread reads; comma-delimited per Slack OAuth.
+        scopes: ${SLACK_OAUTH_SCOPES:search:read.public,search:read.private,channels:history,groups:history}
+        redirect-uri: ${SLACK_OAUTH_REDIRECT_URI:}
+        require-https-redirect: true
+        expected-token-type: user
+        resource: https://mcp.slack.com
+        client-authentication: client_secret_post
+        pkce: true
+      grafana:
+        display-name: Grafana Cloud
+        # Grafana generates these values when an administrator registers Connect AI as an OAuth client.
+        authorize-url: ${GRAFANA_OAUTH_AUTHORIZE_URL:}
+        token-url: ${GRAFANA_OAUTH_TOKEN_URL:}
+        client-id: ${GRAFANA_OAUTH_CLIENT_ID:}
+        client-secret: ${GRAFANA_OAUTH_CLIENT_SECRET:}
+        scopes: ${GRAFANA_OAUTH_SCOPES:}
+        # Must exactly match a Redirect URL registered in Grafana; blank uses CONNECTAI_OAUTH_REDIRECT_URI.
+        redirect-uri: ${GRAFANA_OAUTH_REDIRECT_URI:}
+        client-authentication: ${GRAFANA_OAUTH_CLIENT_AUTHENTICATION:client_secret_basic}
+        pkce: true
   mcp:
     request-timeout-seconds: ${CONNECTAI_MCP_REQUEST_TIMEOUT_SECONDS:20}
     connect-timeout-seconds: ${CONNECTAI_MCP_CONNECT_TIMEOUT_SECONDS:10}
@@ -74,6 +100,15 @@ connectai:
     ollama-num-ctx: ${OLLAMA_NUM_CTX:8192}
     temperature: 0
   agent:
+    semantic:
+      # Optional; enable only after PostgreSQL has the pgvector extension and Ollama has the embedding model.
+      enabled: ${CONNECTAI_SEMANTIC_RETRIEVAL_ENABLED:false}
+      ollama-base-url: ${CONNECTAI_EMBEDDING_OLLAMA_BASE_URL:${OLLAMA_BASE_URL:http://localhost:11434}}
+      embedding-model: ${CONNECTAI_EMBEDDING_MODEL:nomic-embed-text}
+      timeout-seconds: ${CONNECTAI_EMBEDDING_TIMEOUT_SECONDS:10}
+      # pgvector cosine distance is lower for closer matches (0 = identical, 1 = orthogonal).
+      # Results farther than this are omitted so weak nearest neighbors cannot bypass topic gating.
+      max-cosine-distance: ${CONNECTAI_SEMANTIC_MAX_COSINE_DISTANCE:0.6}
     fast-path:
       # Answer recognised questions with a fixed recipe and template (no model call).
       enabled: ${CONNECTAI_FAST_PATH_ENABLED:true}

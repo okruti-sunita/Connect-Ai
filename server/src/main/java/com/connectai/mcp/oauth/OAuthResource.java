@@ -9,7 +9,9 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.util.HtmlUtils;
 import org.springframework.web.server.ResponseStatusException;
 import jakarta.servlet.http.Cookie;
@@ -18,6 +20,8 @@ import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
 import java.util.UUID;
 import java.net.URI;
+import java.util.Arrays;
+import java.util.Objects;
 
 /**
  * OAuth sign-in endpoints for MCP connections.
@@ -31,6 +35,10 @@ import java.net.URI;
 public class OAuthResource {
 
     public record StartResponse(String attemptId, String authorizationUrl, String callbackOrigin) { }
+    public record CallbackRequest(String state, String code, String error, String errorDescription) { }
+
+    @Value("${connectai.cors.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}")
+    private String[] allowedFrontendOrigins;
 
     private final OAuthService oauth;
     private final OAuthProperties properties;
@@ -51,20 +59,22 @@ public class OAuthResource {
     @PostMapping("/api/tools/{id}/oauth/start")
     public ResponseEntity<StartResponse> start(@PathVariable UUID id, HttpServletRequest request) {
         String expectedCallbackPath = request.getContextPath() + "/api/oauth/callback";
-        if (!expectedCallbackPath.equals(URI.create(properties.getRedirectUri()).getPath())) {
+        String redirectUri = oauth.redirectUriForConnection(id);
+        if (!expectedCallbackPath.equals(URI.create(redirectUri).getPath())) {
             throw new ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,
-                    "CONNECTAI_OAUTH_REDIRECT_URI path must match this deployment's /api/oauth/callback route (" + expectedCallbackPath + ").");
+                    "The configured OAuth redirect URI path must match this deployment's /api/oauth/callback route (" + expectedCallbackPath + ").");
         }
-        OAuthService.Started started = oauth.start(id);
+        OAuthService.Started started = oauth.start(id, browserFrontendOrigin(request));
         String cookiePath = request.getContextPath() + "/api/oauth/callback";
+        boolean secureCookie = request.isSecure() || redirectUri.startsWith("https://");
         ResponseCookie binding = ResponseCookie.from(started.cookieName(), started.cookieValue())
                 .httpOnly(true)
-                .secure(request.isSecure() || properties.getRedirectUri().startsWith("https://"))
-                .sameSite(request.isSecure() || properties.getRedirectUri().startsWith("https://") ? "None" : "Lax")
+                .secure(secureCookie)
+                .sameSite(secureCookie ? "None" : "Lax")
                 .path(cookiePath)
                 .maxAge(properties.getAttemptTtlSeconds())
                 .build();
-        String callbackOrigin = URI.create(properties.getRedirectUri()).resolve("/").toString();
+        String callbackOrigin = URI.create(redirectUri).resolve("/").toString();
         if (callbackOrigin.endsWith("/")) callbackOrigin = callbackOrigin.substring(0, callbackOrigin.length() - 1);
         return ResponseEntity.ok().header("Set-Cookie", binding.toString())
                 .header("Cache-Control", "no-store")
@@ -82,6 +92,25 @@ public class OAuthResource {
         return oauth.cancel(attemptId);
     }
 
+    /** Completes a callback relayed from a different callback host back to the initiating browser. */
+    @PostMapping("/api/oauth/callback/complete")
+    public ResponseEntity<OAuthService.Attempt> completeRelayedCallback(
+            @RequestBody CallbackRequest callback, HttpServletRequest request) {
+        String expectedOrigin = oauth.frontendOriginForState(callback.state());
+        if (expectedOrigin == null || !Objects.equals(expectedOrigin, request.getHeader("Origin"))) {
+            throw new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN,
+                    "The OAuth callback did not come from the browser that started sign-in.");
+        }
+        String callbackRedirectUri = oauth.redirectUriForState(callback.state());
+        String cookieName = "connectai_oauth_" + callback.state();
+        String bindingValue = cookieValue(request, cookieName);
+        OAuthService.Attempt attempt = finishCallback(oauth.complete(callback.state(), callback.code(),
+                callback.error(), callback.errorDescription(), bindingValue));
+        ResponseEntity.BodyBuilder response = ResponseEntity.ok().header("Cache-Control", "no-store");
+        clearBindingCookie(response, cookieName, request, callbackRedirectUri);
+        return response.body(attempt);
+    }
+
     @GetMapping(value = "/api/oauth/callback", produces = MediaType.TEXT_HTML_VALUE)
     public ResponseEntity<String> callback(
             @RequestParam(required = false) String code,
@@ -90,17 +119,33 @@ public class OAuthResource {
             @RequestParam(name = "error_description", required = false) String errorDescription,
             HttpServletRequest request) {
 
-        String bindingValue = null;
-        if (state != null && request.getCookies() != null) {
-            String cookieName = "connectai_oauth_" + state;
-            for (Cookie cookie : request.getCookies()) {
-                if (cookieName.equals(cookie.getName())) {
-                    bindingValue = cookie.getValue();
-                    break;
-                }
-            }
+        String callbackRedirectUri = oauth.redirectUriForState(state);
+        String cookieName = state == null ? null : "connectai_oauth_" + state;
+        String bindingValue = cookieName == null ? null : cookieValue(request, cookieName);
+        if (bindingValue == null && oauth.attemptIdForState(state) != null) {
+            return relayCallback(state, code, error, errorDescription, oauth.attemptIdForState(state),
+                    oauth.frontendOriginForState(state));
         }
-        OAuthService.Attempt attempt = oauth.complete(state, code, error, errorDescription, bindingValue);
+        OAuthService.Attempt attempt = finishCallback(oauth.complete(state, code, error, errorDescription, bindingValue));
+        boolean ok = attempt.status() == OAuthService.AttemptStatus.SUCCEEDED;
+        String message = HtmlUtils.htmlEscape(attempt.message());
+        String attemptId = HtmlUtils.htmlEscape(attempt.id() == null ? "" : attempt.id());
+        String status = HtmlUtils.htmlEscape(attempt.status().name());
+        String frontendOrigin = HtmlUtils.htmlEscape(validatedFrontendOrigin());
+        String page = callbackResultPage(attemptId, status, frontendOrigin,
+                ok ? "Access granted" : "Sign-in failed", message,
+                ok ? "setTimeout(function(){window.close();},1200);" : "");
+        ResponseEntity.BodyBuilder response = ResponseEntity.ok()
+                .header("Cache-Control", "no-store")
+                .header("Referrer-Policy", "no-referrer");
+        if (cookieName != null && state.matches("[A-Za-z0-9_-]{20,100}")
+                && !attempt.message().startsWith("This sign-in did not originate from this browser.")) {
+            clearBindingCookie(response, cookieName, request, callbackRedirectUri);
+        }
+        return response.body(page);
+    }
+
+    private OAuthService.Attempt finishCallback(OAuthService.Attempt attempt) {
         if (attempt.status() == OAuthService.AttemptStatus.CONNECTING) {
             try {
                 var connection = connections.connect(attempt.serverId());
@@ -112,11 +157,11 @@ public class OAuthResource {
                         "Sign-in succeeded, but the authenticated MCP connection or tool discovery failed. Check the endpoint and provider permissions, then retry the connection.");
             }
         }
-        boolean ok = attempt.status() == OAuthService.AttemptStatus.SUCCEEDED;
-        String message = HtmlUtils.htmlEscape(attempt.message());
-        String attemptId = HtmlUtils.htmlEscape(attempt.id() == null ? "" : attempt.id());
-        String status = HtmlUtils.htmlEscape(attempt.status().name());
-        String frontendOrigin = HtmlUtils.htmlEscape(validatedFrontendOrigin());
+        return attempt;
+    }
+
+    private ResponseEntity<String> relayCallback(String state, String code, String error, String errorDescription,
+                                                  String attemptId, String frontendOrigin) {
         String page = """
                 <!doctype html>
                 <html lang="en"><head><meta charset="utf-8"><title>Connect AI sign-in</title>
@@ -127,47 +172,75 @@ public class OAuthResource {
                   main{max-width:420px;padding:24px;border-radius:12px;background:#1e293b;text-align:center}
                   h1{font-size:18px;margin:0 0 8px} p{margin:0;color:#cbd5e1}
                 </style></head>
-                <body><main data-attempt-id="%s" data-status="%s" data-target-origin="%s"><h1>%s</h1><p>%s</p></main>
-                <script>(function(){var m=document.querySelector('main');if(window.opener){window.opener.postMessage({type:'connect-ai-oauth',attemptId:m.dataset.attemptId,status:m.dataset.status},m.dataset.targetOrigin);}%s})();</script></body></html>
+                <body><main data-attempt-id="%s" data-state="%s" data-code="%s" data-error="%s" data-error-description="%s" data-target-origin="%s"><h1>Completing sign-in</h1><p>Return to Connect AI to finish securely.</p></main>
+                <script>(function(){var m=document.querySelector('main');if(window.opener){window.opener.postMessage({type:'connect-ai-oauth-callback',attemptId:m.dataset.attemptId,state:m.dataset.state,code:m.dataset.code,error:m.dataset.error,errorDescription:m.dataset.errorDescription},m.dataset.targetOrigin);}})();</script></body></html>
                 """.formatted(
-                attemptId,
-                status,
-                frontendOrigin,
-                ok ? "Access granted" : "Sign-in failed",
-                message,
-                ok ? "setTimeout(function(){window.close();},1200);" : "");
-        ResponseEntity.BodyBuilder response = ResponseEntity.ok()
-                .header("Cache-Control", "no-store")
-                .header("Referrer-Policy", "no-referrer");
-        if (state != null && state.matches("[A-Za-z0-9_-]{20,100}")
-                && !attempt.message().startsWith("This sign-in did not originate from this browser.")) {
-            String cookieName = "connectai_oauth_" + state;
-            String cookiePath = request.getContextPath() + "/api/oauth/callback";
-            ResponseCookie clear = ResponseCookie.from(cookieName, "")
-                    .httpOnly(true).secure(request.isSecure() || properties.getRedirectUri().startsWith("https://"))
-                    .sameSite(request.isSecure() || properties.getRedirectUri().startsWith("https://") ? "None" : "Lax")
-                    .path(cookiePath).maxAge(0).build();
-            response.header("Set-Cookie", clear.toString());
+                html(attemptId), html(state), html(code), html(error), html(errorDescription), html(frontendOrigin));
+        return ResponseEntity.ok().header("Cache-Control", "no-store")
+                .header("Referrer-Policy", "no-referrer").body(page);
+    }
+
+    private static String callbackResultPage(String attemptId, String status, String targetOrigin,
+                                             String title, String message, String script) {
+        return """
+                <!doctype html><html lang="en"><head><meta charset="utf-8"><title>Connect AI sign-in</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1"><style>
+                body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}
+                main{max-width:420px;padding:24px;border-radius:12px;background:#1e293b;text-align:center}h1{font-size:18px;margin:0 0 8px}p{margin:0;color:#cbd5e1}
+                </style></head><body><main data-attempt-id="%s" data-status="%s" data-target-origin="%s"><h1>%s</h1><p>%s</p></main>
+                <script>(function(){var m=document.querySelector('main');if(window.opener){window.opener.postMessage({type:'connect-ai-oauth',attemptId:m.dataset.attemptId,status:m.dataset.status},m.dataset.targetOrigin);}%s})();</script></body></html>
+                """.formatted(attemptId, status, targetOrigin, title, message, script);
+    }
+
+    private String browserFrontendOrigin(HttpServletRequest request) {
+        String origin = request.getHeader("Origin");
+        if (origin == null || origin.isBlank()) return validatedFrontendOrigin();
+        if (Arrays.stream(allowedFrontendOrigins).map(String::trim).noneMatch(origin::equals)) {
+            throw new ResponseStatusException(org.springframework.http.HttpStatus.FORBIDDEN,
+                    "This browser origin is not allowed to start OAuth.");
         }
-        return response.body(page);
+        return validateFrontendOrigin(origin);
     }
 
     private String validatedFrontendOrigin() {
+        return validateFrontendOrigin(properties.getFrontendOrigin());
+    }
+
+    private static String validateFrontendOrigin(String origin) {
         try {
-            URI uri = URI.create(properties.getFrontendOrigin());
+            URI uri = URI.create(origin);
             String scheme = uri.getScheme();
             boolean loopbackHttp = "http".equalsIgnoreCase(scheme)
                     && ("localhost".equalsIgnoreCase(uri.getHost()) || "127.0.0.1".equals(uri.getHost()));
             if (uri.getHost() == null || uri.getUserInfo() != null || uri.getRawQuery() != null
                     || uri.getRawFragment() != null || (uri.getRawPath() != null && !uri.getRawPath().isEmpty())
-                    || !("https".equalsIgnoreCase(scheme) || loopbackHttp)) {
-                throw new IllegalArgumentException();
-            }
+                    || !("https".equalsIgnoreCase(scheme) || loopbackHttp)) throw new IllegalArgumentException();
             return scheme.toLowerCase(java.util.Locale.ROOT) + "://" + uri.getRawAuthority();
         } catch (RuntimeException exception) {
             throw new ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,
-                    "CONNECTAI_FRONTEND_ORIGIN must be an HTTPS browser origin (HTTP is allowed only for localhost development).");
+                    "The OAuth frontend origin must be HTTPS (HTTP is allowed only for localhost development).");
         }
+    }
+
+    private static String html(String value) {
+        return HtmlUtils.htmlEscape(value == null ? "" : value);
+    }
+
+    private static String cookieValue(HttpServletRequest request, String cookieName) {
+        if (request.getCookies() == null) return null;
+        for (Cookie cookie : request.getCookies()) if (cookieName.equals(cookie.getName())) return cookie.getValue();
+        return null;
+    }
+
+    private void clearBindingCookie(ResponseEntity.BodyBuilder response, String cookieName,
+                                    HttpServletRequest request, String callbackRedirectUri) {
+        String cookiePath = request.getContextPath() + "/api/oauth/callback";
+        boolean secureCookie = request.isSecure() || callbackRedirectUri.startsWith("https://");
+        ResponseCookie clear = ResponseCookie.from(cookieName, "")
+                .httpOnly(true).secure(secureCookie)
+                .sameSite(secureCookie ? "None" : "Lax")
+                .path(cookiePath).maxAge(0).build();
+        response.header("Set-Cookie", clear.toString());
     }
 
     @Configuration

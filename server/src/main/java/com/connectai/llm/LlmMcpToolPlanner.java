@@ -8,11 +8,17 @@ import com.connectai.agent.IdentityFacts;
 import com.connectai.agent.JsonCompactor;
 import com.connectai.agent.McpToolCandidate;
 import com.connectai.agent.PlannerDecision;
+import com.connectai.agent.PlannerFailureException;
+import com.connectai.agent.AgentFailureCategory;
+import com.connectai.agent.ProviderConstraint;
+import com.connectai.agent.SlackSearchQueryPolicy;
+import com.connectai.agent.SafeDiagnostic;
 import com.connectai.agent.ToolArgumentValidator;
 import com.connectai.agent.ToolCallKey;
 import com.connectai.agent.ToolExecutionContent;
 import com.connectai.agent.ToolSelectionPlan;
 import com.connectai.agent.ToolShortlister;
+import com.connectai.agent.ToolSemanticRetriever;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -50,10 +56,12 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
 
     static final String FINISH = "FINISH";
     static final int DEFAULT_SHORTLIST_SIZE = 6;
-    private static final int MAX_PARAMETERS = 6;
+    // MCP servers frequently declare many optional search parameters. Hiding the latter
+    // fields makes the planner guess provider argument names (and loses required semantics).
+    private static final int MAX_PARAMETERS = 24;
     static final int DEFAULT_MAX_ATTEMPTS = 3;
     private static final int MAX_RESULT_EXCERPT = 500;
-    private static final int MAX_DESCRIPTION = 140;
+    private static final int MAX_DESCRIPTION = 2400;
 
     private static final String SYSTEM = """
             You are the tool-selection step of an engineering investigation agent.
@@ -74,6 +82,14 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
               the same tool and its schema-defined pagination argument until the result says there are no
               more pages or the step budget prevents it. Do not treat one page as a complete total.
             - For a requested date range, apply the range using the available tool parameters or query syntax.
+            - For Slack message search, preserve user-supplied quoted phrases as exact phrases. Do not add quotes
+              around ordinary multiword concepts; search their words normally. If a successful search is empty
+              or clearly irrelevant, make at most one meaningful query refinement, preserving all explicit
+              channel, date, user and visibility constraints. Never repeat an identical query.
+            - For Grafana logs, metrics or labels, never invent a datasource UID. If the query needs a datasource
+              and its identifier is missing, first use a discovered read-only datasource listing/discovery tool,
+              then select only from returned datasource metadata. If multiple compatible datasources remain
+              equally plausible, stop and explain the ambiguity instead of guessing.
             - If the question is about the user's own resources ("my", "I") and the user's
               identity is not known yet, a tool that returns the authenticated user comes first.
             - Choose FINISH when previous steps already returned enough evidence to answer,
@@ -87,12 +103,18 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
     private final LlmClient llm;
     private final int shortlistSize;
     private final int maxAttempts;
+    private final ToolSemanticRetriever semanticRetriever;
 
     public LlmMcpToolPlanner(LlmClient llm) {
         this(llm, DEFAULT_SHORTLIST_SIZE, DEFAULT_MAX_ATTEMPTS);
     }
 
     public LlmMcpToolPlanner(LlmClient llm, int shortlistSize, int maxAttempts) {
+        this(llm, shortlistSize, maxAttempts, ToolSemanticRetriever.disabled());
+    }
+
+    public LlmMcpToolPlanner(
+            LlmClient llm, int shortlistSize, int maxAttempts, ToolSemanticRetriever semanticRetriever) {
         if (shortlistSize <= 0) {
             throw new IllegalArgumentException("shortlistSize must be greater than zero");
         }
@@ -102,6 +124,7 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
         this.llm = llm;
         this.shortlistSize = shortlistSize;
         this.maxAttempts = maxAttempts;
+        this.semanticRetriever = java.util.Objects.requireNonNull(semanticRetriever, "semanticRetriever");
     }
 
     @Override
@@ -136,22 +159,48 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
 
         validateCatalog(availableTools);
         AgentExecutionState current = state == null ? AgentExecutionState.initial(question) : state;
+        ProviderConstraint.Scope providerScope = ProviderConstraint.apply(question, availableTools);
+        List<McpToolCandidate> planningCatalog = providerScope.tools();
+        boolean explicitlyScopedProvider = providerScope.constrained();
 
-        // Deterministic topic gate: only tools whose metadata covers what the question is about.
-        ToolShortlister.TopicCoverage coverage = ToolShortlister.topicCoverage(question, availableTools);
-        if (coverage.noToolCoversTheTopic()) {
+        // The vector retriever can recover semantically relevant tools that have no literal topic token match.
+        Map<String, McpToolCandidate> liveById = new LinkedHashMap<>();
+        planningCatalog.forEach(tool -> liveById.put(tool.plannerId(), tool));
+        List<McpToolCandidate> retrievedSemantic;
+        try {
+            retrievedSemantic = semanticRetriever.retrieve(question, planningCatalog, shortlistSize);
+        } catch (RuntimeException exception) {
+            log.warn("Semantic tool retrieval failed; using the lexical catalog only ({})",
+                    com.connectai.agent.SafeDiagnostic.message(exception, 240));
+            retrievedSemantic = List.of();
+        }
+        List<McpToolCandidate> semantic = retrievedSemantic.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(candidate -> liveById.get(candidate.plannerId()))
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .limit(shortlistSize)
+                .toList();
+        Set<String> semanticIds = semantic.stream().map(McpToolCandidate::plannerId)
+                .collect(java.util.stream.Collectors.toSet());
+
+        // Deterministic topic gate remains the lexical baseline; semantic candidates may augment it.
+        ToolShortlister.TopicCoverage coverage =
+                ToolShortlister.topicCoverage(question, planningCatalog, explicitlyScopedProvider);
+        if (coverage.noToolCoversTheTopic() && semantic.isEmpty()) {
             log.info("MCP planner: no connected tool covers the question topics {} ({} tools)",
                     coverage.topics(), availableTools.size());
             return PlannerDecision.finish("None of the " + availableTools.size()
                     + " connected tools provides data about: " + String.join(", ", coverage.topics()) + ".");
         }
-        List<McpToolCandidate> eligible = coverage.topics().isEmpty()
-                ? availableTools
-                : ToolShortlister.withNameMatches(question, coverage.covering(), availableTools);
+        List<McpToolCandidate> eligible = coverage.noToolCoversTheTopic() ? List.of() : coverage.topics().isEmpty()
+                ? planningCatalog
+                : ToolShortlister.withNameMatches(question, coverage.covering(), planningCatalog);
 
-        List<McpToolCandidate> shortlist = ToolShortlister.distinctToolCount(eligible) <= shortlistSize
+        List<McpToolCandidate> lexical = ToolShortlister.distinctToolCount(eligible) <= shortlistSize
                 ? List.copyOf(eligible)
                 : ToolShortlister.shortlist(question, eligible, shortlistSize);
+        List<McpToolCandidate> shortlist = mergeLexicalAndSemantic(lexical, semantic, semanticIds);
 
         if (shortlist.isEmpty()) {
             log.info("MCP planner found no relevant tool among {} candidates", availableTools.size());
@@ -163,8 +212,8 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
         for (int i = 0; i < shortlist.size(); i++) {
             byShortId.put("T" + (i + 1), shortlist.get(i));
         }
-        log.info("MCP planner shortlist: catalog={}, shortlist={}",
-                availableTools.size(), byShortId.entrySet().stream()
+        log.info("MCP planner shortlist: catalog={}, lexicalCandidates={}, semanticCandidates={}, shortlist={}",
+                availableTools.size(), lexical.size(), semantic.size(), byShortId.entrySet().stream()
                         .map(e -> e.getKey() + "=" + e.getValue().toolName()).toList());
 
         Set<String> succeededCalls = new HashSet<>();
@@ -179,13 +228,13 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
         // Identity tools are needed to scope first-person data requests, but topic filtering
         // commonly removes get_me because its short name does not match a topic such as commits.
         // It is safe to select only the argument-free identity tool from the discovered catalog.
-        java.util.Optional<PlannerDecision> identity = identityFirst(question, availableTools, current);
+        java.util.Optional<PlannerDecision> identity = identityFirst(question, planningCatalog, current);
         if (identity.isPresent()) {
             log.info("MCP planner: identity call first for a first-person question: {}", identity.get().plan().toolName());
             return identity.get();
         }
 
-        java.util.Optional<PlannerDecision> fanOut = fanOutToOtherConnections(question, availableTools, current);
+        java.util.Optional<PlannerDecision> fanOut = fanOutToOtherConnections(question, planningCatalog, current);
         if (fanOut.isPresent()) {
             log.info("MCP planner fan-out: {} on connection {}", fanOut.get().plan().toolName(), fanOut.get().plan().serverId());
             return fanOut.get();
@@ -240,8 +289,19 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
                 sawRepeat = true;
                 lastProblem = repeated.getMessage();
                 log.info("MCP planner attempt {} repeated a completed call: {}", attempt, lastProblem);
+            } catch (LlmProviderException providerFailure) {
+                AgentFailureCategory category = providerFailure.statusCode() == 429
+                        ? AgentFailureCategory.PROVIDER_RATE_LIMIT : AgentFailureCategory.PROVIDER_FAILURE;
+                log.warn("MCP planner stopped after provider HTTP {} on attempt {}", providerFailure.statusCode(), attempt);
+                throw new PlannerFailureException(category, providerFailure.getMessage(),
+                        providerFailure.retryAfterSeconds());
             } catch (LlmException invalid) {
-                lastProblem = invalid.getMessage();
+                if (isRateLimit(invalid)) {
+                    log.warn("MCP planner stopped after rate-limit response on attempt {}", attempt);
+                    throw new PlannerFailureException(AgentFailureCategory.PROVIDER_RATE_LIMIT,
+                            "LLM provider rate limit (HTTP 429).", null);
+                }
+                lastProblem = SafeDiagnostic.message(invalid, 500);
                 log.warn("MCP planner attempt {}/{} rejected after {}ms: {}",
                         attempt, maxAttempts, elapsedMs(started), lastProblem);
             }
@@ -252,8 +312,33 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
             return PlannerDecision.finish("No new tool call was proposed after the evidence already collected.");
         }
 
-        throw new LlmException("The model did not produce a valid tool decision after "
-                + maxAttempts + " attempts. Last problem: " + lastProblem);
+        throw new PlannerFailureException(AgentFailureCategory.PLANNER_FAILURE,
+                "The investigation planner could not produce a valid tool decision after bounded retries.", null);
+    }
+
+    private static boolean isRateLimit(LlmException exception) {
+        String message = exception.getMessage();
+        return message != null && message.matches("(?is).*\\bHTTP\\s+429\\b.*");
+    }
+
+    private List<McpToolCandidate> mergeLexicalAndSemantic(
+            List<McpToolCandidate> lexical,
+            List<McpToolCandidate> semantic,
+            Set<String> semanticIds) {
+        if (semantic.isEmpty()) {
+            LinkedHashMap<String, McpToolCandidate> merged = new LinkedHashMap<>();
+            lexical.forEach(tool -> merged.put(tool.plannerId(), tool));
+            return merged.values().stream().limit(shortlistSize).toList();
+        }
+
+        int semanticSlots = Math.min(semantic.size(), Math.max(1, shortlistSize / 3));
+        int lexicalSlots = shortlistSize - semanticSlots;
+        LinkedHashMap<String, McpToolCandidate> merged = new LinkedHashMap<>();
+        lexical.stream().filter(tool -> !semanticIds.contains(tool.plannerId())).limit(lexicalSlots)
+                .forEach(tool -> merged.put(tool.plannerId(), tool));
+        semantic.stream().limit(semanticSlots).forEach(tool -> merged.putIfAbsent(tool.plannerId(), tool));
+        lexical.stream().limit(shortlistSize).forEach(tool -> merged.putIfAbsent(tool.plannerId(), tool));
+        return merged.values().stream().limit(shortlistSize).toList();
     }
 
     private PlannerDecision interpret(
@@ -296,8 +381,10 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
             throw new LlmException("invalid arguments for " + candidate.toolName() + ": \"arguments\" must be a JSON object");
         }
 
+        Map<String, Object> proposedArguments = SlackSearchQueryPolicy.normalize(
+                question, candidate, jsonObjectToMap(argumentsNode));
         ToolArgumentValidator.Result validation = ToolArgumentValidator.validate(
-                candidate.inputSchema(), jsonObjectToMap(argumentsNode));
+                candidate.inputSchema(), proposedArguments);
         if (!validation.valid()) {
             throw new LlmException("invalid arguments for " + candidate.toolName() + ": "
                     + String.join("; ", validation.errors()));
@@ -526,6 +613,29 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
                     .append("\n");
         });
 
+        boolean hasGrafana = byShortId.values().stream()
+                .anyMatch(tool -> "grafana".equalsIgnoreCase(tool.providerKey()));
+        if (hasGrafana && question.toLowerCase(java.util.Locale.ROOT).matches("(?s).*(log|metric|label|datasource).*")) {
+            boolean discoveryAvailable = byShortId.values().stream().anyMatch(LlmMcpToolPlanner::isDatasourceDiscovery);
+            boolean datasourceOutputExists = state.steps().stream().filter(step -> step.status() == AgentStepStatus.SUCCESS)
+                    .anyMatch(step -> step.plan().toolName().toLowerCase(java.util.Locale.ROOT).contains("datasource"));
+            prompt.append("\nGrafana datasource prerequisite: ");
+            if (datasourceOutputExists) {
+                prompt.append("use only the datasource identifier returned in the prior datasource discovery result; ");
+            } else if (discoveryAvailable) {
+                prompt.append("the identifier is not established yet, so choose the discovered datasource listing tool first; ");
+            } else {
+                prompt.append("no datasource discovery result or listing capability is available; do not invent an identifier; ");
+            }
+            prompt.append("never invent a datasource identifier. If discovery yields multiple equally compatible datasources and user intent does not choose one, finish and report that clarification is needed.\n");
+        }
+        long slackQueryVariants = state.steps().stream().filter(step -> step.status() == AgentStepStatus.SUCCESS)
+                .filter(step -> "slack".equalsIgnoreCase(providerFor(step, byShortId)))
+                .map(step -> querySignature(step.plan().arguments())).filter(value -> !value.isBlank()).distinct().count();
+        if (slackQueryVariants >= 2) {
+            prompt.append("\nSlack query refinement limit reached: do not run another Slack search; use current evidence or explain its limitation.\n");
+        }
+
         prompt.append("\nReply with {\"action\": one of ")
                 .append(String.join(", ", byShortId.keySet()))
                 .append(" or FINISH, \"arguments\": {...}, \"reason\": \"...\"}\n");
@@ -549,6 +659,29 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
             }
         }
         return prompt.toString();
+    }
+
+    private static boolean isDatasourceDiscovery(McpToolCandidate tool) {
+        String text = (tool.toolName() + " " + tool.title() + " " + tool.description())
+                .toLowerCase(java.util.Locale.ROOT);
+        return "grafana".equalsIgnoreCase(tool.providerKey()) && text.contains("datasource")
+                && (text.contains("list") || text.contains("discover") || text.contains("search"));
+    }
+
+    private static String providerFor(AgentExecutionStep step, Map<String, McpToolCandidate> candidates) {
+        return candidates.values().stream().filter(tool -> tool.serverId().equals(step.plan().serverId())
+                        && tool.toolName().equals(step.plan().toolName()))
+                .map(McpToolCandidate::providerKey).findFirst().orElse("");
+    }
+
+    private static String querySignature(Map<String, Object> arguments) {
+        Map<String, Object> query = new java.util.TreeMap<>();
+        arguments.forEach((key, value) -> {
+            String normalized = key.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z]", "");
+            if (normalized.contains("query") || normalized.contains("keyword") || normalized.equals("q")
+                    || normalized.contains("filter")) query.put(key, value);
+        });
+        return query.isEmpty() ? "" : ToolCallKey.canonicalJson(query);
     }
 
     @SuppressWarnings("unchecked")
@@ -578,7 +711,7 @@ public class LlmMcpToolPlanner implements DynamicToolPlanner {
             }
             part.append(")");
             if (property.get("description") instanceof String description && !description.isBlank()) {
-                part.append(" ").append(oneLine(description, 60));
+                part.append(" ").append(oneLine(description, 180));
             }
             parts.add(part.toString());
         });

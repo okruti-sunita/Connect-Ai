@@ -17,13 +17,15 @@ public record AgentExecutionState(
         String question,
         List<AgentExecutionStep> steps,
         AgentExecutionStatus status,
-        String stopReason
+        String stopReason,
+        AgentFailureCategory failureCategory
 ) {
 
     public AgentExecutionState {
         Objects.requireNonNull(question, "question");
         Objects.requireNonNull(steps, "steps");
         Objects.requireNonNull(status, "status");
+        failureCategory = failureCategory == null ? AgentFailureCategory.NONE : failureCategory;
 
         if (question.isBlank()) {
             throw new IllegalArgumentException(
@@ -37,7 +39,12 @@ public record AgentExecutionState(
             String question,
             List<AgentExecutionStep> steps,
             AgentExecutionStatus status) {
-        this(question, steps, status, null);
+        this(question, steps, status, null, AgentFailureCategory.NONE);
+    }
+
+    public AgentExecutionState(String question, List<AgentExecutionStep> steps,
+                               AgentExecutionStatus status, String stopReason) {
+        this(question, steps, status, stopReason, AgentFailureCategory.NONE);
     }
 
     public static AgentExecutionState initial(String question) {
@@ -45,7 +52,8 @@ public record AgentExecutionState(
                 question,
                 List.of(),
                 AgentExecutionStatus.RUNNING,
-                null);
+                null,
+                AgentFailureCategory.NONE);
     }
 
     public AgentExecutionState addStep(AgentExecutionStep step) {
@@ -59,7 +67,8 @@ public record AgentExecutionState(
                 question,
                 updated,
                 status,
-                stopReason);
+                stopReason,
+                failureCategory);
     }
 
     public AgentExecutionState withStatus(
@@ -68,18 +77,25 @@ public record AgentExecutionState(
                 question,
                 steps,
                 Objects.requireNonNull(newStatus, "newStatus"),
-                stopReason);
+                stopReason,
+                failureCategory);
     }
 
     /** Terminal transition with an explanation of why the loop stopped. */
     public AgentExecutionState finish(
             AgentExecutionStatus newStatus,
             String reason) {
+        return finish(newStatus, reason, failureCategory);
+    }
+
+    public AgentExecutionState finish(AgentExecutionStatus newStatus, String reason,
+                                      AgentFailureCategory category) {
         return new AgentExecutionState(
                 question,
                 steps,
                 Objects.requireNonNull(newStatus, "newStatus"),
-                reason);
+                reason,
+                category);
     }
 
     public int stepCount() {

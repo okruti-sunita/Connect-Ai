@@ -498,4 +498,37 @@
         </createIndex>
     </changeSet>
 
+    <!-- Optional semantic tool retrieval. The pgvector extension is an administrator prerequisite;
+         leave this changeset pending when the extension is unavailable so it can run after setup. -->
+    <changeSet id="014-pgvector-tool-embeddings" author="connect-ai" dbms="postgresql">
+        <preConditions onFail="CONTINUE" onError="CONTINUE">
+            <sqlCheck expectedResult="1">SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN 1 ELSE 0 END</sqlCheck>
+        </preConditions>
+        <sql><![CDATA[
+            CREATE TABLE IF NOT EXISTS mcp_tool_embedding (
+                server_id uuid NOT NULL,
+                tool_name varchar(200) NOT NULL,
+                embedding_model varchar(200) NOT NULL,
+                embedding_version varchar(40) NOT NULL,
+                embedding_dimension integer NOT NULL,
+                content_hash char(64) NOT NULL,
+                embedding vector NOT NULL,
+                indexed_at timestamptz NOT NULL,
+                CONSTRAINT pk_mcp_tool_embedding PRIMARY KEY (server_id, tool_name, embedding_model)
+            )
+        ]]></sql>
+        <createIndex tableName="mcp_tool_embedding" indexName="idx_mcp_tool_embedding_model">
+            <column name="embedding_model"/>
+            <column name="embedding_dimension"/>
+        </createIndex>
+    </changeSet>
+
+    <changeSet id="015-evidence-completeness" author="connect-ai">
+        <addColumn tableName="evidence_item">
+            <column name="completeness" type="varchar(20)" defaultValue="UNKNOWN">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+    </changeSet>
+
 </databaseChangeLog>

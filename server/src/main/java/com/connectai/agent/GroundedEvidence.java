@@ -13,13 +13,15 @@ public record GroundedEvidence(
         int stepNumber,
         UUID serverId,
         String toolName,
-        String content
+        String content,
+        EvidenceCompleteness completeness
 ) {
     public GroundedEvidence {
         Objects.requireNonNull(citation, "citation");
         Objects.requireNonNull(serverId, "serverId");
         Objects.requireNonNull(toolName, "toolName");
         Objects.requireNonNull(content, "content");
+        completeness = completeness == null ? EvidenceCompleteness.UNKNOWN : completeness;
 
         if (citation.isBlank()) {
             throw new IllegalArgumentException("citation must not be blank");
@@ -33,5 +35,9 @@ public record GroundedEvidence(
         if (content.isBlank()) {
             throw new IllegalArgumentException("content must not be blank");
         }
+    }
+
+    public GroundedEvidence(String citation, int stepNumber, UUID serverId, String toolName, String content) {
+        this(citation, stepNumber, serverId, toolName, content, EvidenceCompleteness.UNKNOWN);
     }
 }

@@ -21,7 +21,8 @@ public record McpToolCandidate(
         String description,
         Map<String, Object> inputSchema,
         Boolean readOnlyHint,
-        String serverName
+        String serverName,
+        String providerKey
 ) {
 
     public McpToolCandidate {
@@ -36,6 +37,12 @@ public record McpToolCandidate(
         description = description == null ? "" : description;
         inputSchema = inputSchema == null ? Map.of() : Map.copyOf(inputSchema);
         serverName = serverName == null ? "" : serverName;
+        providerKey = providerKey == null ? "" : providerKey;
+    }
+
+    public McpToolCandidate(UUID serverId, String toolName, String title, String description,
+                            Map<String, Object> inputSchema, Boolean readOnlyHint, String serverName) {
+        this(serverId, toolName, title, description, inputSchema, readOnlyHint, serverName, "");
     }
 
     public McpToolCandidate(
@@ -45,7 +52,7 @@ public record McpToolCandidate(
             String description,
             Map<String, Object> inputSchema,
             Boolean readOnlyHint) {
-        this(serverId, toolName, title, description, inputSchema, readOnlyHint, null);
+        this(serverId, toolName, title, description, inputSchema, readOnlyHint, null, "");
     }
 
     public McpToolCandidate(
@@ -54,7 +61,7 @@ public record McpToolCandidate(
             String title,
             String description,
             Map<String, Object> inputSchema) {
-        this(serverId, toolName, title, description, inputSchema, null, null);
+        this(serverId, toolName, title, description, inputSchema, null, null, "");
     }
 
     /**

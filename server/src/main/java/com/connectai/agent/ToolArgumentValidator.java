@@ -19,8 +19,8 @@ import java.util.Objects;
  * Two small, lossless normalisations are applied because small local models produce
  * them constantly: optional properties set to null are dropped, and numeric/boolean
  * strings ("5", "true") are converted when the schema demands a number/boolean.
- * Properties the schema does not declare are dropped unless the schema explicitly
- * allows additional properties, and rejected when it forbids them.
+ * When a tool declares an explicit property map, undeclared names are rejected rather
+ * than silently removed: that can turn a meaningful search query into an empty request.
  */
 public final class ToolArgumentValidator {
 
@@ -70,7 +70,7 @@ public final class ToolArgumentValidator {
             Map<String, Object> propertySchema = properties == null ? null : asMap(properties.get(key));
 
             if (propertySchema == null) {
-                if (forbidsExtra) {
+                if (forbidsExtra || properties != null) {
                     errors.add(childPath + " is not a parameter of this tool");
                 } else if (allowsExtra) {
                     out.put(key, item);

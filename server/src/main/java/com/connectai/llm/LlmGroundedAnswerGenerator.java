@@ -110,10 +110,21 @@ public class LlmGroundedAnswerGenerator implements GroundedAnswerGenerator {
     @Override
     public GroundedAnswer generate(AgentExecutionState state, AnswerHints hints) {
         AnswerHints runHints = hints == null ? AnswerHints.NONE : hints;
-        List<String> uncovered = runHints.uncoveredCapabilities();
         GroundedAnswerContext context = contextBuilder.build(state);
+        if (context.hasEvidence() && state.failureCategory() != com.connectai.agent.AgentFailureCategory.NONE
+                && !runHints.uncoveredCapabilities().isEmpty()) {
+            // A candidate gate is not proof that a requested capability is absent once tools
+            // have returned evidence. Preserve the evidence and describe coverage instead.
+            runHints = new AnswerHints(List.of(), runHints.connectionNames(), runHints.warnings());
+        }
+        List<String> uncovered = runHints.uncoveredCapabilities();
 
         if (!context.hasEvidence()) {
+            return fallback.generate(state, runHints);
+        }
+        if (state.failureCategory() != com.connectai.agent.AgentFailureCategory.NONE) {
+            // Do not spend another provider call synthesizing after a planner failure/rate limit.
+            // The deterministic fallback uses the already persisted evidence.
             return fallback.generate(state, runHints);
         }
 

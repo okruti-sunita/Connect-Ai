@@ -4,6 +4,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Deterministic planner used when LLM mode is disabled.
@@ -12,6 +14,18 @@ import java.util.Optional;
  * an MCP tool that declares required input fields.
  */
 public class RuleBasedDynamicToolPlanner implements DynamicToolPlanner {
+
+    private static final Logger log = LoggerFactory.getLogger(RuleBasedDynamicToolPlanner.class);
+
+    private final ToolSemanticRetriever semanticRetriever;
+
+    public RuleBasedDynamicToolPlanner() {
+        this(ToolSemanticRetriever.disabled());
+    }
+
+    public RuleBasedDynamicToolPlanner(ToolSemanticRetriever semanticRetriever) {
+        this.semanticRetriever = java.util.Objects.requireNonNull(semanticRetriever, "semanticRetriever");
+    }
 
     @Override
     public Optional<ToolSelectionPlan> plan(
@@ -47,6 +61,26 @@ public class RuleBasedDynamicToolPlanner implements DynamicToolPlanner {
                     candidate.toolName(),
                     Map.of(),
                     "Selected by deterministic MCP tool metadata matching"));
+        }
+
+        // Optional semantic fallback uses the same live catalog and conservative schema rule.
+        List<McpToolCandidate> semantic;
+        try {
+            semantic = semanticRetriever.retrieve(question, availableTools, 6);
+        } catch (RuntimeException exception) {
+            log.warn("Semantic tool retrieval failed; using lexical catalog only: {}",
+                    SafeDiagnostic.message(exception, 240));
+            semantic = List.of();
+        }
+        java.util.Map<String, McpToolCandidate> live = new java.util.HashMap<>();
+        availableTools.forEach(candidate -> live.put(candidate.plannerId(), candidate));
+        for (McpToolCandidate retrieved : semantic) {
+            if (retrieved == null) continue;
+            McpToolCandidate candidate = live.get(retrieved.plannerId());
+            if (candidate == null || alreadyExecuted(candidate, state)
+                    || !hasNoRequiredArguments(candidate.inputSchema())) continue;
+            return Optional.of(new ToolSelectionPlan(candidate.serverId(), candidate.toolName(), Map.of(),
+                    "Selected by semantic MCP tool metadata matching"));
         }
 
         return Optional.empty();

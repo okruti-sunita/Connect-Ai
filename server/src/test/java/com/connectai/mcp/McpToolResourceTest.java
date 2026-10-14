@@ -121,6 +121,8 @@ class McpToolResourceTest {
                 .andExpect(jsonPath("$[0].status").value("AVAILABLE"))
                 .andExpect(jsonPath("$[0].connector.methods[0].id").value("OAUTH_APP"))
                 .andExpect(jsonPath("$[0].connector.methods[0].supported").value(false))
+                .andExpect(jsonPath("$[0].connector.defaultEndpoint").value("https://api.githubcopilot.com/mcp/readonly"))
+                .andExpect(jsonPath("$[0].connector.variants[0].endpoint").value("https://api.githubcopilot.com/mcp/readonly"))
                 .andExpect(jsonPath("$[0].statusReason").value(org.hamcrest.Matchers.containsString("Ready to connect using Personal access token.")))
                 .andExpect(jsonPath("$[0].adminSetupRequired").value(false))
                 .andExpect(jsonPath("$[0].connector.clientSecret").doesNotExist());

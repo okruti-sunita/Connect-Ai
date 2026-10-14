@@ -108,6 +108,7 @@ class McpInvestigationPipelineIntegrationTest {
 
         Map<String, Object> investigation = post("/api/investigations",
                 Map.of("question", "Identify my authenticated account login")).getBody();
+        assertThat(investigation.get("traceId")).isEqualTo(investigation.get("id"));
 
         // Recognised question: answered by the deterministic fast path (exact template, no model call).
         assertThat(investigation).containsEntry("status", "ANSWERED").containsEntry("route", "FAST_PATH");
@@ -117,7 +118,8 @@ class McpInvestigationPipelineIntegrationTest {
                 .containsEntry("argumentsJson", "{}");
         List<Map<String, Object>> evidence = list(investigation.get("evidence"));
         assertThat(evidence).hasSize(1);
-        assertThat(evidence.get(0)).containsEntry("sourceRef", "E1").containsEntry("toolName", "get_me");
+        assertThat(evidence.get(0)).containsEntry("sourceRef", "E1").containsEntry("toolName", "get_me")
+                .containsEntry("completeness", "UNKNOWN");
         assertThat(evidence.get(0).get("summary").toString()).contains("pipeline-test-user");
         assertThat(investigation.get("resolvedAnswer").toString()).contains("pipeline-test-user");
 
@@ -125,6 +127,7 @@ class McpInvestigationPipelineIntegrationTest {
         Map<String, Object> reloaded = get("/api/investigations/" + investigation.get("id")).getBody();
         assertThat(reloaded.get("status")).isEqualTo("ANSWERED");
         assertThat(list(reloaded.get("evidence"))).hasSize(1);
+        assertThat(list(reloaded.get("evidence")).get(0)).containsEntry("completeness", "UNKNOWN");
         assertThat(reloaded.get("completedAt")).isNotNull();
     }
 

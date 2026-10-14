@@ -40,7 +40,11 @@ public class TemplateGroundedAnswerGenerator implements GroundedAnswerGenerator 
         if (!context.failureDetails().isEmpty()) {
             limitations.add("Some tool calls failed: " + String.join("; ", context.failureDetails()));
         }
-        if (!runHints.uncoveredCapabilities().isEmpty()) {
+        if (context.hasEvidence() && context.executionStatus() != AgentExecutionStatus.COMPLETED
+                && context.stopReason() != null && !context.stopReason().isBlank()) {
+            limitations.add("Investigation stopped before completion: " + context.stopReason());
+        }
+        if (!context.hasEvidence() && !runHints.uncoveredCapabilities().isEmpty()) {
             limitations.add("No connected tool provides data about "
                     + String.join(", ", runHints.uncoveredCapabilities()));
         }
@@ -67,6 +71,28 @@ public class TemplateGroundedAnswerGenerator implements GroundedAnswerGenerator 
                     true);
         }
 
+        if (context.executionStatus() == AgentExecutionStatus.FAILED
+                && !EvidenceRelevance.hasRelevantEvidence(context.question(), context.evidence())) {
+            String answer = "A tool call succeeded, but its returned evidence does not address the requested topic. "
+                    + "The investigation cannot verify an answer from these results.";
+            if (!limitations.isEmpty()) answer += "\n\nLimitations: " + String.join("; ", limitations) + ".";
+            return new GroundedAnswer(answer, context.evidence(), context.executionStatus(), false, true,
+                    GroundedAnswer.Coverage.NONE);
+        }
+
+        if (EvidenceRelevance.allExplicitlyEmpty(context.evidence())) {
+            boolean complete = context.executionStatus() == AgentExecutionStatus.COMPLETED
+                    && context.qualityWarnings().isEmpty() && runHints.warnings().isEmpty();
+            String answer = complete
+                    ? "The completed search returned no matching records."
+                    : "The search returned no matching records before the investigation completed; overall coverage is partial.";
+            answer += " [" + context.evidence().get(0).citation() + "]";
+            StringBuilder result = new StringBuilder(answer);
+            appendLimitations(result, limitations);
+            return new GroundedAnswer(result.toString(), context.evidence(), context.executionStatus(), true, true,
+                    complete ? GroundedAnswer.Coverage.FULL : GroundedAnswer.Coverage.PARTIAL);
+        }
+
         String answer = context.evidence().stream()
                 .map(evidence -> "[" + evidence.citation() + "] " + evidence.toolName() + ": "
                         + readableEvidence(evidence.content()))
@@ -79,7 +105,8 @@ public class TemplateGroundedAnswerGenerator implements GroundedAnswerGenerator 
                 context.evidence(),
                 context.executionStatus(),
                 true,
-                true);
+                true,
+                GroundedAnswer.Coverage.PARTIAL);
     }
 
     private static void appendLimitations(StringBuilder answer, List<String> limitations) {

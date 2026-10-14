@@ -5,6 +5,7 @@ import com.connectai.agent.DynamicToolPlanner;
 import com.connectai.agent.PlannedToolExecutor;
 import com.connectai.agent.RuleBasedDynamicToolPlanner;
 import com.connectai.agent.ToolExecutionPort;
+import com.connectai.agent.ToolSemanticRetriever;
 import com.connectai.agent.GroundedAnswerContextBuilder;
 import com.connectai.agent.fastpath.FastPathEngine;
 import com.connectai.llm.LlmMcpToolPlanner;
@@ -39,10 +40,11 @@ public class AgentExecutionConfig {
             havingValue = "true")
     public DynamicToolPlanner llmDynamicToolPlanner(
             LlmClient llmClient,
+            ToolSemanticRetriever semanticRetriever,
             @Value("${connectai.agent.planner.shortlist-size:6}") int shortlistSize,
             @Value("${connectai.agent.planner.max-attempts:3}") int maxAttempts) {
 
-        return new LlmMcpToolPlanner(llmClient, shortlistSize, maxAttempts);
+        return new LlmMcpToolPlanner(llmClient, shortlistSize, maxAttempts, semanticRetriever);
     }
 
     @Bean
@@ -50,9 +52,9 @@ public class AgentExecutionConfig {
             name = "connectai.llm.enabled",
             havingValue = "false",
             matchIfMissing = true)
-    public DynamicToolPlanner ruleBasedDynamicToolPlanner() {
+    public DynamicToolPlanner ruleBasedDynamicToolPlanner(ToolSemanticRetriever semanticRetriever) {
 
-        return new RuleBasedDynamicToolPlanner();
+        return new RuleBasedDynamicToolPlanner(semanticRetriever);
     }
 
     /** Deterministic answers for recognised questions (no model call). Disable to always use the AI agent. */

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Optional;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -113,6 +114,36 @@ class McpConnectionServiceTest {
         assertFalse(registry.isConnected(serverId));
 
         verify(client).closeGracefully();
+    }
+
+    @Test
+    void emptyToolDiscoveryDoesNotLeaveAHealthyRuntimeSession() {
+        McpServerRepository repository = mock(McpServerRepository.class);
+        McpClientFactory factory = mock(McpClientFactory.class);
+        McpClientRegistry registry = new McpClientRegistry();
+        McpToolDiscoveryService discovery = mock(McpToolDiscoveryService.class);
+        McpSyncClient client = mock(McpSyncClient.class);
+        McpSchema.InitializeResult initialized = mock(McpSchema.InitializeResult.class);
+        EMcpServer server = new EMcpServer("empty", McpTransportType.STREAMABLE_HTTP,
+                "http://localhost:8080/mcp", McpAuthType.NONE, null, true);
+        UUID serverId = UUID.randomUUID();
+        when(repository.findById(serverId)).thenReturn(Optional.of(server));
+        when(repository.save(server)).thenReturn(server);
+        when(factory.create(server)).thenReturn(client);
+        when(client.initialize()).thenReturn(initialized);
+        when(discovery.discover(serverId)).thenReturn(
+                new com.connectai.mcp.api.dto.McpToolDiscoveryResponse(serverId, List.of()));
+
+        McpConnectionService service = new McpConnectionService(repository, factory, registry, null, discovery);
+
+        ResponseStatusException failure = assertThrows(ResponseStatusException.class, () -> service.connect(serverId));
+
+        assertEquals(502, failure.getStatusCode().value());
+        assertTrue(failure.getReason().contains("returned no tools"));
+        assertEquals(McpConnectionStatus.FAILED, server.getStatus());
+        assertFalse(registry.isConnected(serverId));
+        verify(client).closeGracefully();
+        verify(discovery).discover(serverId);
     }
 
     @Test

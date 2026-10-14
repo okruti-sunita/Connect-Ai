@@ -1,6 +1,6 @@
 import {useEffect, useRef, useState} from 'react';
 import {Button, Form, Input, Modal, Segmented, Select, message} from 'antd';
-import {Check, ShieldCheck} from 'lucide-react';
+import {Check, CircleAlert, Circle, ShieldCheck} from 'lucide-react';
 import './style/connect-tool-modal.scss';
 import ToolLogo from './tool-logo';
 import type {CatalogItem, ConnectMethod} from './tool-catalog';
@@ -20,6 +20,8 @@ interface FormValues {
     headerValue?: string;
     headerName2?: string;
     headerValue2?: string;
+    grafanaUrl?: string;
+    endpointToken?: string;
 }
 
 interface TestState {
@@ -57,6 +59,7 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
     const [form] = Form.useForm<FormValues>();
     const [step, setStep] = useState<1 | 2>(1);
     const [test, setTest] = useState<TestState | null>(null);
+    const [oauthAuthorizationUrl, setOauthAuthorizationUrl] = useState<string | null>(null);
     const alive = useRef(true);
     const activePopup = useRef<Window | null>(null);
     // Remembers the tool created during this session so "Retry" does not register a duplicate.
@@ -88,10 +91,16 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                 const ready = providers.some((p) => p.id === item.oauthProvider && p.configured);
                 setOauthProvider(providers.find((p) => p.id === item.oauthProvider) ?? null);
                 setOauthReady(ready);
-                if (!ready) form.setFieldValue('authMethod', item.methods.some((method) => method.id === 'TOKEN_BEARER' && method.supported) ? 'token' : 'oauth');
+                if (!ready) form.setFieldValue('authMethod', item.methods.some((method) =>
+                    (method.id === 'TOKEN_BEARER' || item.key === 'grafana' && method.id === 'TOKEN_HEADERS') && method.supported) ? 'token' : 'oauth');
             })
             .catch(() => {
-                if (alive) setOauthReady(false);
+                if (alive) {
+                    setOauthReady(false);
+                    const hasFallback = item.methods.some((method) =>
+                        (method.id === 'TOKEN_BEARER' || item.key === 'grafana' && method.id === 'TOKEN_HEADERS') && method.supported);
+                    if (hasFallback) form.setFieldValue('authMethod', 'token');
+                }
             });
         return () => {
             alive = false;
@@ -100,13 +109,15 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
     const defaultMethod = item.methods.find((method) => method.supported)?.id ?? 'NONE';
     const connectMethod: ConnectMethod = isCustom || externalMcpRequired || !item.oauthProvider
         ? watchedConnectionMethod ?? defaultMethod
-        : (watchedMethod ?? 'oauth') === 'oauth' ? 'OAUTH_APP' : 'TOKEN_BEARER';
+        : (watchedMethod ?? 'oauth') === 'oauth' ? 'OAUTH_APP'
+            : item.key === 'grafana' ? 'TOKEN_HEADERS' : 'TOKEN_BEARER';
     const authType: RegisterToolPayload['authType'] = connectMethod === 'OAUTH_APP' || connectMethod === 'OAUTH_DISCOVERY'
         ? 'OAUTH' : connectMethod === 'NONE' ? 'NONE' : 'BEARER';
     const stages = authType === 'OAUTH' ? oauthStages(item.name) : TOKEN_STAGES;
     const endpoint = Form.useWatch('endpoint', form);
     const usingManagedAddress = !isCustom && !!item.endpoint && endpoint === item.endpoint;
-    const oauthAlternative = item.methods.some((method) => method.id === 'TOKEN_BEARER' && method.supported);
+    const oauthAlternative = item.methods.some((method) =>
+        (method.id === 'TOKEN_BEARER' || item.key === 'grafana' && method.id === 'TOKEN_HEADERS') && method.supported);
 
     const runTest = async (popup: Window | null) => {
         const v = form.getFieldsValue(true) as FormValues;
@@ -129,6 +140,7 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
         set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
         try {
             if (authType === 'OAUTH') {
+                setOauthAuthorizationUrl(null);
                 if (!registered.current || registered.current.fingerprint !== fingerprint) {
                     const created = await toolsApi.register(payload);
                     registered.current = {id: created.id, fingerprint};
@@ -137,7 +149,10 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                 stage = 1;
                 set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
                 // The callback exchanges the code, stores it, handshakes with MCP, and discovers tools.
-                const signIn = await signInWithPopup(id, popup);
+                const signIn = await signInWithPopup(id, popup, () => {
+                    stage = 2;
+                    set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
+                }, setOauthAuthorizationUrl);
                 if (!signIn.ok) throw new ToolsApiError(signIn.message, 401);
                 stage = 2;
                 set({phase: 'running', stage, capabilities: [], capabilitiesFailed: false});
@@ -155,8 +170,14 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                     credentials.token = v.headerValue ?? '';
                 }
                 if (connectMethod === 'TOKEN_HEADERS') {
-                    if (v.headerName) credentials[`header:${v.headerName}`] = v.headerValue ?? '';
-                    if (v.headerName2) credentials[`header:${v.headerName2}`] = v.headerValue2 ?? '';
+                    if (item.key === 'grafana') {
+                        credentials['header:X-Grafana-URL'] = v.grafanaUrl ?? '';
+                        credentials['header:X-Grafana-Service-Account-Token'] = v.token ?? '';
+                        if (v.endpointToken?.trim()) credentials['header:Authorization'] = `Bearer ${v.endpointToken.trim()}`;
+                    } else {
+                        if (v.headerName) credentials[`header:${v.headerName}`] = v.headerValue ?? '';
+                        if (v.headerName2) credentials[`header:${v.headerName2}`] = v.headerValue2 ?? '';
+                    }
                 }
                 const connectionPayload: CreateConnectionPayload = {
                     catalogKey: item.key,
@@ -215,6 +236,10 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
 
     const initialEndpoint = item.deployments?.[0]?.endpoint ?? item.defaultEndpoint;
     const running = test?.phase === 'running';
+    const oauthAwaitingApproval = running && test?.stage === 1;
+    const oauthAccessGranted = !!test && (test.phase === 'success' || test.stage >= 2);
+    const oauthMcpVerifying = running && test?.stage !== undefined && test.stage >= 2;
+    const oauthMcpFailed = test?.phase === 'failed' && test.stage >= 2;
     const methodSelector = isCustom || externalMcpRequired || (!item.oauthProvider
         && item.methods.filter((method) => method.supported).length > 1);
     const renderCredentialField = (name: string, required: boolean) => {
@@ -304,13 +329,16 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                             <Form.Item
                                 label="MCP endpoint URL"
                                 name="endpoint"
-                                extra={usingManagedAddress ? `Filled in for you. This is the standard ${item.name} address.` : undefined}
+                                extra={usingManagedAddress && !(item.key === 'grafana' && authType !== 'OAUTH')
+                                    ? `Filled in for you. This is the standard ${item.name} address.` : undefined}
                                 rules={[
                                     {required: true, message: 'Enter the server address'},
                                     {pattern: /^https?:\/\/\S+$/i, message: 'The address must start with http:// or https://'},
                                 ]}
                             >
-                                <Input placeholder="https://tools.yourcompany.com/mcp" autoComplete="off"
+                                <Input placeholder={item.key === 'grafana' && authType === 'OAUTH'
+                                    ? 'https://mcp.grafana.com/mcp'
+                                    : item.key === 'grafana' ? 'https://mcp-grafana.yourcompany.com/mcp' : 'https://tools.yourcompany.com/mcp'} autoComplete="off"
                                        disabled={!item.endpointEditable}/>
                             </Form.Item>
 
@@ -328,7 +356,7 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                             {!isCustom && item.oauthProvider && (
                                 <Form.Item label="How should Connect AI access it?" name="authMethod"
                                            extra={oauthReady === false && !oauthAlternative
-                                               ? `Administrator setup required: configure ${item.requiredServerSettings?.join(', ') || 'the provider OAuth client'} on the backend and register this callback URI with ${item.name}: ${oauthProvider?.redirectUri ?? 'the backend configured redirect URI'}.`
+                                               ? `${item.name} sign-in requires server-side OAuth setup. Configure ${item.requiredServerSettings?.join(', ') || 'the provider OAuth client'} on the backend and register this callback URI with ${item.name}: ${oauthProvider?.redirectUri ?? 'the backend configured redirect URI'}.`
                                                : oauthReady === false
                                                    ? `Sign-in with ${item.name} is not configured on this server. You can connect now with the token method. To enable provider sign-in, configure ${item.requiredServerSettings?.join(', ') || 'the provider OAuth client'} and register ${oauthProvider?.redirectUri ?? 'the backend configured redirect URI'}.`
                                                : authType === 'OAUTH'
@@ -339,7 +367,7 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                                         options={[
                                             ...(item.methods.some((method) => method.id === 'OAUTH_APP' && method.supported)
                                                 ? [{label: `Sign in with ${item.name}`, value: 'oauth', disabled: oauthReady !== true}] : []),
-                                            ...(oauthAlternative ? [{label: 'Access token', value: 'token'}] : []),
+                                            ...(oauthAlternative ? [{label: item.key === 'grafana' ? 'Self-hosted / service account' : 'Access token', value: 'token'}] : []),
                                         ]}
                                     />
                                 </Form.Item>
@@ -358,7 +386,12 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                                 {renderCredentialField('headerName', true)}
                                 {renderCredentialField('headerValue', true)}
                             </>}
-                            {connectMethod === 'TOKEN_HEADERS' && <>
+                            {connectMethod === 'TOKEN_HEADERS' && item.key === 'grafana' && <>
+                                {renderCredentialField('grafanaUrl', true)}
+                                {renderCredentialField('token', true)}
+                                {renderCredentialField('endpointToken', false)}
+                            </>}
+                            {connectMethod === 'TOKEN_HEADERS' && item.key !== 'grafana' && <>
                                 {renderCredentialField('headerName', true)}
                                 {renderCredentialField('headerValue', true)}
                                 {renderCredentialField('headerName2', false)}
@@ -385,23 +418,48 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
                                     </Button>
                                     {oauthAlternative && <button type="button" className="oauth-link-button" disabled={running}
                                         onClick={() => { form.setFieldValue('authMethod', 'token'); setTest(null); setStep(1); }}>
-                                        Use an access token instead
+                                        {item.key === 'grafana' ? 'Use self-hosted Grafana instead' : 'Use an access token instead'}
                                     </button>}
                                     {test?.phase === 'failed' && test.stage === 0 && <p className="oauth-stage-error" role="alert">{test.error}</p>}
                                 </article>
                                 <article className={`oauth-stage-card ${test?.phase === 'success' || (test && test.stage > 1) ? 'complete' : test?.phase === 'running' && test.stage === 1 ? 'active' : ''}`}>
                                     <span className="oauth-stage-label">2 Sign in</span>
                                     <div className="oauth-stage-title"><ToolLogo name={item.name} item={item} size={44}/><strong>{test?.phase === 'running' && test.stage === 1 ? `Waiting for ${item.name}` : `Sign in to ${item.name}`}</strong></div>
-                                    <div className={`oauth-wait-panel ${test?.phase === 'running' && test.stage === 1 ? 'waiting' : ''}`}>
-                                        <span className="oauth-spinner" aria-hidden="true"/>
-                                        <span>{test?.phase === 'running' && test.stage === 1 ? 'Finish signing in in the pop-up window' : 'A secure sign-in window opens when you continue.'}</span>
+                                    <div className={`oauth-wait-panel ${oauthAwaitingApproval ? 'waiting' : oauthAccessGranted ? 'approved' : ''}`}>
+                                        {oauthAccessGranted ? <Check size={20} aria-hidden="true"/>
+                                            : oauthAwaitingApproval ? <span className="oauth-spinner" aria-hidden="true"/>
+                                                : <ShieldCheck size={20} aria-hidden="true"/>}
+                                        <span>{oauthAwaitingApproval ? 'Finish in the pop-up window or use the Chrome link below'
+                                            : oauthAccessGranted ? test?.phase === 'running'
+                                                ? `Access granted by ${item.name}. Verifying the MCP connection…`
+                                                : `Access granted by ${item.name}.`
+                                                : test?.phase === 'failed' && test.stage === 1 ? 'Sign-in was not completed.'
+                                                    : 'A secure sign-in window opens when you continue.'}</span>
+                                        {oauthAuthorizationUrl && test?.phase === 'running' && (
+                                            <a className="oauth-authorization-link" href={oauthAuthorizationUrl} target="connectai-oauth" onClick={(event) => {
+                                                const popup = activePopup.current;
+                                                if (popup && !popup.closed) {
+                                                    event.preventDefault();
+                                                    popup.focus();
+                                                }
+                                            }}>
+                                                Open authorization page in Chrome
+                                            </a>
+                                        )}
                                     </div>
                                     {test?.phase === 'failed' && test.stage === 1 && <p className="oauth-stage-error" role="alert">{test.error}</p>}
-                                    {test?.phase === 'running' && <p className="oauth-stage-hint">You can return here after approving access.</p>}
+                                    {oauthAwaitingApproval && <p className="oauth-stage-hint">You can return here after approving access.</p>}
                                 </article>
-                                <article className={`oauth-stage-card ${test?.phase === 'success' ? 'complete' : test?.phase === 'running' && test.stage >= 2 ? 'active' : ''}`}>
+                                <article className={`oauth-stage-card ${test?.phase === 'success' ? 'complete' : oauthMcpVerifying ? 'active' : oauthMcpFailed ? 'failed' : ''}`}>
                                     <span className="oauth-stage-label">3 Done</span>
-                                    <div className="oauth-stage-title"><span className={`oauth-done-icon ${test?.phase === 'success' ? 'ready' : ''}`}>{test?.phase === 'success' ? <Check size={22}/> : <span className="oauth-spinner"/>}</span><strong>{test?.phase === 'success' ? `${item.name} connected` : 'MCP tools verified'}</strong></div>
+                                    <div className="oauth-stage-title"><span className={`oauth-done-icon ${test?.phase === 'success' ? 'ready' : oauthMcpFailed ? 'failed' : ''}`}>
+                                        {test?.phase === 'success' ? <Check size={22}/>
+                                            : oauthMcpFailed ? <CircleAlert size={20}/>
+                                                : oauthMcpVerifying ? <span className="oauth-spinner" aria-label="Verifying MCP connection"/>
+                                                    : <Circle size={20} aria-hidden="true"/>}
+                                    </span><strong>{test?.phase === 'success' ? `${item.name} connected`
+                                        : oauthMcpFailed ? 'MCP verification failed'
+                                            : oauthMcpVerifying ? 'Verifying MCP connection' : 'Discover MCP tools'}</strong></div>
                                     {test?.phase === 'success' ? (
                                         <>
                                             <p>{test.capabilities.length} tools found and ready to use.</p>
@@ -458,7 +516,31 @@ const Wizard = ({item, existingNames, onClose, onChanged}: WizardProps) => {
 
                 <aside className="wizard-about">
                     <h3>About this MCP server</h3>
-                {item.connectorMode === 'external-mcp-required' ? (
+                {item.key === 'grafana' && authType === 'OAUTH' ? (
+                    <>
+                        <p>Connects to Grafana Cloud’s hosted MCP server. Sign in with your Grafana identity and approve the access requested by your administrator’s OAuth client. Connect AI checks the authenticated MCP connection and discovers the tools your account can use.</p>
+                        <h4>Required</h4>
+                        <ul className="plain">
+                            <li>Grafana Cloud MCP enabled for your stack</li>
+                            <li>Permission to use Grafana Cloud MCP</li>
+                            <li>A one-time Connect AI OAuth client registration by your Grafana administrator</li>
+                        </ul>
+                        <h4>Capabilities</h4>
+                        <p>Available dashboards, metrics, logs, traces, alerts, and Assistant tools depend on your Grafana permissions and the access approved during sign-in.</p>
+                    </>
+                ) : item.key === 'grafana' ? (
+                    <>
+                        <p>{item.permissionsText}</p>
+                        <h4>Required</h4>
+                        <ul className="plain">
+                            <li>A trusted, reachable Grafana MCP server using Streamable HTTP</li>
+                            <li>An allowlisted Grafana URL and least-privilege service-account token</li>
+                            <li>Use a protected MCP endpoint; its bearer token is separate from the Grafana token</li>
+                        </ul>
+                        <h4>Capabilities</h4>
+                        <p>Dashboards, datasources, metrics, logs, traces, alerting, and incident tools appear only when the MCP server enables them and the Grafana account has permission.</p>
+                    </>
+                ) : item.connectorMode === 'external-mcp-required' ? (
                     <>
                         <p>{item.name} does not have a verified, managed MCP endpoint configured in this application. Provide the endpoint of an MCP server for this service. Connect AI will only show capabilities actually returned by that server.</p>
                         <h4>Required</h4>
@@ -523,7 +605,7 @@ interface ToolConnectModalProps {
 
 const ToolConnectModal = ({open, preset, session, existingNames, onClose, onChanged}: ToolConnectModalProps) => (
     <Modal open={open} footer={null} title={null} centered width={900} mask={{closable: false}} destroyOnHidden onCancel={onClose}
-           className="tool-wizard-modal" styles={{container: {padding: 0, overflow: 'hidden'}}}>
+           className="tool-wizard-modal" styles={{container: {padding: 0, maxHeight: 'calc(100dvh - 32px)', overflowY: 'auto', overflowX: 'hidden'}}}>
         {/* antd keeps closed content mounted until the animation ends, so a new key per opening is what resets it. */}
         <Wizard key={`${preset.id}-${session}`} item={preset}
                 existingNames={existingNames} onClose={onClose} onChanged={onChanged}/>

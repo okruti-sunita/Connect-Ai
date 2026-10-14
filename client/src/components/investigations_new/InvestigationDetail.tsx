@@ -127,6 +127,7 @@ const InvestigationDetail = ({ id, onBack }: Props) => {
                             Started {data.startedAgo}
                             {data.completedAgo && <> · finished {data.completedAgo}</>}
                         </p>
+                        <p className="step-meta">Trace ID: <code>{data.traceId}</code></p>
                         {data.route && (
                             <span className={`route-badge ${ROUTE_BADGE[data.route]?.css ?? 'ai'}`}
                                   title={ROUTE_BADGE[data.route]?.title ?? 'Planned and answered by the AI agent.'}>
@@ -212,7 +213,7 @@ const InvestigationDetail = ({ id, onBack }: Props) => {
                                      onKeyDown={(ev) => { if (ev.key === "Enter") setActive(e); }}>
                                 <SourceBadge source={e.source} />
                                 <div className="run-card-body">
-                                    <h4>[{e.title}] {e.toolName ?? ""}{e.serverName && <small> · {e.serverName}</small>}{e.stepNumber != null && <small> · step {e.stepNumber}</small>} <small>· {e.when}</small></h4>
+                                    <h4>[{e.title}] {e.toolName ?? ""}{e.serverName && <small> · {e.serverName}</small>}{e.stepNumber != null && <small> · step {e.stepNumber}</small>} <small>· {e.when}</small> <small>· {e.completeness?.toLowerCase() ?? "unknown coverage"}</small></h4>
                                     <p className="evidence-snippet">{e.snippet}</p>
                                 </div>
                                 {e.confidence != null && (

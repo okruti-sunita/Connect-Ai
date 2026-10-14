@@ -2,6 +2,7 @@ package com.connectai.mcp.service;
 
 import com.connectai.mcp.api.dto.RegisterMcpServerRequest;
 import com.connectai.mcp.api.dto.ReplaceMcpCredentialRequest;
+import com.connectai.mcp.api.dto.ReplaceGrafanaCredentialsRequest;
 import com.connectai.mcp.catalog.ConnectMethod;
 import com.connectai.mcp.client.McpClientRegistry;
 import com.connectai.mcp.client.McpEndpoint;
@@ -13,6 +14,9 @@ import com.connectai.mcp.model.McpServer;
 import com.connectai.mcp.operation.McpToolOperations;
 import com.connectai.mcp.repository.McpServerRepository;
 import com.connectai.mcp.security.SecretEncryptionService;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.beans.factory.annotation.Value;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -21,6 +25,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -32,6 +38,9 @@ public class McpToolService implements McpToolOperations {
     private final SecretEncryptionService encryptionService;
     private final McpClientRegistry clientRegistry;
     private final OAuthService oauth;
+    private final ObjectMapper mapper;
+    @Value("${connectai.mcp.allow-private-hosts:false}")
+    private boolean allowPrivateHosts;
 
     @Override
     @Transactional
@@ -121,6 +130,34 @@ public class McpToolService implements McpToolOperations {
         entity.replaceBearerCredential(encryptionService.encrypt(request.secret()));
         EMcpServer saved = repository.save(entity);
         return McpServer.from(saved, false);
+    }
+
+    @Override
+    @Transactional
+    public McpServer replaceGrafanaCredentials(UUID id, ReplaceGrafanaCredentialsRequest request) {
+        EMcpServer entity = repository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "MCP connection not found"));
+        if (!"grafana".equals(entity.getCatalogKey()) || entity.getConnectMethod() != ConnectMethod.TOKEN_HEADERS) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "This connection does not use Grafana credentials.");
+        }
+        if (clientRegistry.isConnected(id)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Disconnect Grafana before replacing its credentials.");
+        }
+        String grafanaUrl;
+        try { grafanaUrl = com.connectai.mcp.client.GrafanaInstanceUrlPolicy.validate(request.grafanaUrl(), allowPrivateHosts); }
+        catch (IllegalArgumentException ex) { throw new ResponseStatusException(HttpStatus.BAD_REQUEST, ex.getMessage()); }
+        Map<String, String> credentials = new LinkedHashMap<>();
+        credentials.put("header:X-Grafana-URL", grafanaUrl);
+        credentials.put("header:X-Grafana-Service-Account-Token", request.serviceAccountToken().trim());
+        if (request.endpointToken() != null && !request.endpointToken().isBlank()) {
+            credentials.put("header:Authorization", "Bearer " + request.endpointToken().trim());
+        }
+        try {
+            entity.replaceAuthConfiguration(encryptionService.encrypt(mapper.writeValueAsString(credentials)));
+        } catch (JsonProcessingException ex) {
+            throw new IllegalStateException("Unable to encode Grafana authentication configuration");
+        }
+        return McpServer.from(repository.save(entity), false);
     }
 
     /** Rejects configurations that can never connect, before anything is stored. */

@@ -14,6 +14,7 @@ import com.connectai.agent.ToolExecutionContent;
 import com.connectai.agent.ToolExecutionPort;
 import com.connectai.agent.ToolExecutionRequest;
 import com.connectai.agent.ToolExecutionResult;
+import com.connectai.agent.ToolSemanticRetriever;
 import com.connectai.domain.InvestigationStatus;
 import com.connectai.llm.LlmClient;
 import com.connectai.llm.LlmMcpToolPlanner;
@@ -85,6 +86,77 @@ class DynamicAgentExecutionFlowTest {
         assertThat(evidence).hasSize(1);
         assertThat(evidence.get(0).content()).contains("PAY-123 is OPEN.").contains("status=OPEN");
         assertThat(llm.calls).isEqualTo(2);
+    }
+
+    @Test
+    void semanticOnlyRouteExecutesExactArgumentsAndProducesGroundedAnswer() throws Exception {
+        McpToolCandidate semanticTool = new McpToolCandidate(SERVER_ID, "query_ticket_context", "Ticket context",
+                "Retrieve historical context for a support case", issueSearchSchema(), true, "Jira Work");
+        ToolSemanticRetriever acceptedSemanticResult = (question, liveTools, limit) -> List.of(semanticTool);
+        ScriptedLlm llm = new ScriptedLlm(mapper,
+                """
+                        {"action":"T1","arguments":{"query":"PAY-123"},"reason":"Retrieve the case context."}
+                        """,
+                """
+                        {"action":"FINISH","arguments":{},"reason":"The returned case context answers the question."}
+                        """);
+        List<ToolExecutionRequest> requests = new ArrayList<>();
+        ToolExecutionPort port = request -> {
+            requests.add(request);
+            return new ToolExecutionResult(request.toolName(), false,
+                    List.of(new ToolExecutionContent("text", "PAY-123 was escalated after a database timeout.")),
+                    Map.of("status", "ESCALATED", "cause", "database timeout"));
+        };
+        ControlledAgentExecutor executor = new ControlledAgentExecutor(
+                new LlmMcpToolPlanner(llm, 6, 2, acceptedSemanticResult),
+                new PlannedToolExecutor(port), 4, Duration.ofMinutes(1), 2);
+
+        AgentExecutionState execution = executor.execute("Why was PAY-123 escalated?", List.of(semanticTool));
+        GroundedAnswer answer = new TemplateGroundedAnswerGenerator(new GroundedAnswerContextBuilder())
+                .generate(execution);
+
+        assertThat(requests).containsExactly(new ToolExecutionRequest(
+                SERVER_ID, "query_ticket_context", Map.of("query", "PAY-123")));
+        assertThat(execution.steps()).singleElement().satisfies(step ->
+                assertThat(step.result().structuredContent()).isEqualTo(
+                        Map.of("status", "ESCALATED", "cause", "database timeout")));
+        assertThat(answer.evidence()).singleElement().satisfies(evidence ->
+                assertThat(evidence.content()).contains("database timeout", "ESCALATED"));
+        assertThat(answer.answer()).contains("database timeout", "[E1]");
+    }
+
+    @Test
+    void providerConstraintScopesCatalogBeforeSemanticRetrieval() {
+        McpToolCandidate slack = new McpToolCandidate(SERVER_ID, "search_messages", "Slack messages",
+                "Search Slack messages", issueSearchSchema(), true, "Slack - Workspace", "slack");
+        McpToolCandidate linear = new McpToolCandidate(UUID.randomUUID(), "search_issues", "Linear issues",
+                "Search Linear issues", issueSearchSchema(), true, "Linear - Workspace", "linear");
+        List<List<McpToolCandidate>> retrievedCatalogs = new ArrayList<>();
+        ToolSemanticRetriever semantic = (question, liveTools, limit) -> {
+            retrievedCatalogs.add(List.copyOf(liveTools));
+            return List.of(linear); // A foreign result cannot escape the provider-scoped live catalog.
+        };
+        ScriptedLlm llm = new ScriptedLlm(mapper,
+                """
+                        {"action":"T1","arguments":{"query":"PAY-123"},"reason":"Search Slack."}
+                        """);
+        List<ToolExecutionRequest> requests = new ArrayList<>();
+        ToolExecutionPort port = request -> {
+            requests.add(request);
+            return new ToolExecutionResult(request.toolName(), false,
+                    List.of(new ToolExecutionContent("text", "Slack message PAY-123 found.")), Map.of());
+        };
+        ControlledAgentExecutor executor = new ControlledAgentExecutor(
+                new LlmMcpToolPlanner(llm, 6, 1, semantic), new PlannedToolExecutor(port),
+                2, Duration.ofMinutes(1), 1);
+
+        AgentExecutionState result = executor.execute("Search Slack messages for PAY-123", List.of(slack, linear));
+
+        assertThat(retrievedCatalogs).isNotEmpty().allSatisfy(catalog -> assertThat(catalog).containsExactly(slack));
+        assertThat(requests).containsExactly(new ToolExecutionRequest(
+                SERVER_ID, "search_messages", Map.of("query", "PAY-123")));
+        assertThat(result.steps()).singleElement().satisfies(step ->
+                assertThat(step.plan().serverId()).isEqualTo(SERVER_ID));
     }
 
     @Test

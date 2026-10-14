@@ -100,6 +100,13 @@ export interface OAuthStartDto {
     callbackOrigin: string;
 }
 
+export interface OAuthCallbackPayload {
+    state: string;
+    code?: string;
+    error?: string;
+    errorDescription?: string;
+}
+
 export interface Capability {
     name: string;
     description: string;
@@ -135,11 +142,15 @@ export const toolsApi = {
     register: (payload: RegisterToolPayload) => request<McpServerDto>('/tools', 'POST', payload),
     replaceBearerCredential: (id: string, secret: string) => request<McpServerDto>(
         `/tools/${id}/credential`, 'PUT', {secret}),
+    replaceGrafanaCredentials: (id: string, payload: {grafanaUrl: string; serviceAccountToken: string; endpointToken?: string}) =>
+        request<McpServerDto>(`/tools/${id}/grafana-credentials`, 'PUT', payload),
     connect: (id: string) => request<ConnectionStatusDto>(`/tools/${id}/connect`, 'POST'),
     disconnect: (id: string) => request<ConnectionStatusDto>(`/tools/${id}/disconnect`, 'POST'),
     oauthProviders: () => request<OAuthProviderDto[]>('/oauth/providers'),
     startOAuth: (id: string) => apiRequest<OAuthStartDto>(
         `/tools/${id}/oauth/start`, 'POST', undefined, undefined, 'include'),
+    completeOAuth: (payload: OAuthCallbackPayload) => apiRequest<OAuthAttemptDto>(
+        '/oauth/callback/complete', 'POST', payload, undefined, 'include'),
     oauthAttempt: (attemptId: string) => request<OAuthAttemptDto>(`/oauth/attempts/${encodeURIComponent(attemptId)}`),
     cancelOAuthAttempt: (attemptId: string) => request<OAuthAttemptDto>(
         `/oauth/attempts/${encodeURIComponent(attemptId)}/cancel`, 'POST'),

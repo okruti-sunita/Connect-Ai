@@ -103,7 +103,7 @@ class GroundedAnswerContextBuilderTest {
     }
 
     @Test
-    void skipsSuccessfulResultWithNoUsableContent() {
+    void preservesSuccessfulEmptyResultAsEmptyEvidence() {
         ToolSelectionPlan plan = new ToolSelectionPlan(
                 SERVER_ID,
                 "empty_tool",
@@ -124,7 +124,9 @@ class GroundedAnswerContextBuilderTest {
         GroundedAnswerContext context =
                 new GroundedAnswerContextBuilder().build(state);
 
-        assertThat(context.evidence()).isEmpty();
+        assertThat(context.evidence()).hasSize(1);
+        assertThat(context.evidence().get(0).completeness()).isEqualTo(EvidenceCompleteness.EMPTY);
+        assertThat(context.evidence().get(0).content()).contains("returned no content");
     }
 
     @Test
@@ -143,6 +145,7 @@ class GroundedAnswerContextBuilderTest {
         assertThat(context.evidence()).hasSize(1);
         assertThat(context.evidence().get(0).content().length()).isEqualTo(4_001);
         assertThat(context.evidence().get(0).content()).endsWith("…");
+        assertThat(context.evidence().get(0).completeness()).isEqualTo(EvidenceCompleteness.TRUNCATED);
     }
 
     @Test
@@ -151,6 +154,7 @@ class GroundedAnswerContextBuilderTest {
                 .addStep(step(1, Map.of("page", 1), Map.of("items", List.of(Map.of("sha", "abc")), "has_more", true)));
         GroundedAnswerContext context = new GroundedAnswerContextBuilder().build(state);
         assertThat(context.evidence()).hasSize(1);
+        assertThat(context.evidence().get(0).completeness()).isEqualTo(EvidenceCompleteness.PARTIAL);
         assertThat(context.qualityWarnings()).anyMatch(warning -> warning.contains("additional pages"));
     }
 
@@ -163,17 +167,20 @@ class GroundedAnswerContextBuilderTest {
                         Map.of("items", List.of(Map.of("sha", "def")), "has_more", false)));
         GroundedAnswerContext context = new GroundedAnswerContextBuilder().build(state);
         assertThat(context.evidence()).hasSize(2);
+        assertThat(context.evidence().get(1).completeness()).isEqualTo(EvidenceCompleteness.COMPLETE);
         assertThat(context.qualityWarnings()).noneMatch(warning -> warning.contains("additional pages"))
                 .noneMatch(warning -> warning.contains("do not establish a complete total"));
     }
 
     @Test
-    void overlappingPagesArePreservedButFlaggedForDeduplication() {
+    void overlappingPagesKeepProvenanceButDeduplicateRecordsBeforeSynthesis() {
         AgentExecutionState state = AgentExecutionState.initial("What is the total number of issues?")
                 .addStep(step(1, Map.of("page", 1), Map.of("items", List.of(Map.of("key", "PAY-123")), "has_more", true)))
                 .addStep(step(2, Map.of("page", 2), Map.of("items", List.of(Map.of("key", "PAY-123")), "has_more", false)));
         GroundedAnswerContext context = new GroundedAnswerContextBuilder().build(state);
         assertThat(context.evidence()).hasSize(2);
+        assertThat(context.evidence().get(0).content()).contains("PAY-123");
+        assertThat(context.evidence().get(1).content()).doesNotContain("PAY-123");
         assertThat(context.qualityWarnings()).anyMatch(warning -> warning.contains("Duplicate records"));
     }
 

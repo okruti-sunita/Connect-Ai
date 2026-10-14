@@ -35,7 +35,8 @@ class GenericFastPathTest {
     }
 
     private static McpToolCandidate tool(UUID server, String name, String description, Map<String, Object> schema, String connection) {
-        return new McpToolCandidate(server, name, "", description, schema, true, connection);
+        return new McpToolCandidate(server, name, "", description, schema, true, connection,
+                connection.split("\\s+-\\s+", 2)[0].toLowerCase(java.util.Locale.ROOT).replace(' ', '-'));
     }
 
     private static final List<McpToolCandidate> JIRA_TOOLS = List.of(
@@ -130,6 +131,66 @@ class GenericFastPathTest {
         assertThat(calls).extracting(ToolExecutionRequest::toolName).containsExactly("get_viewer", "list_issues");
         assertThat(calls.get(1).arguments()).containsEntry("assigneeId", "user-7").containsEntry("state", "open");
         assertThat(result.answer().answer()).contains("#42 Fix login");
+    }
+
+    @Test
+    void explicitlyNamedLinearProviderConstrainsAssignedTaskLookup() {
+        UUID github = UUID.fromString("00000000-0000-0000-0000-0000000000c4");
+        McpToolCandidate linearList = new McpToolCandidate(LINEAR, "list_issues", "", "List issues.",
+                schema(Map.of("assigneeId", Map.of("type", "string"),
+                        "state", Map.of("type", "string", "enum", List.of("open", "closed"))), "assigneeId"),
+                true, "Linear", "linear");
+        List<McpToolCandidate> tools = List.of(
+                tool(github, "get_me", "Get the authenticated GitHub user.", schema(Map.of()), "GitHub"),
+                tool(github, "list_issues", "List GitHub issues assigned to a user.", schema(Map.of(
+                        "assignee", Map.of("type", "string"))), "GitHub"),
+                LINEAR_TOOLS.get(0), linearList);
+
+        var result = ask("Which tasks are assigned to me on Linear?", tools, r -> {
+            if (r.serverId().equals(github)) return r.toolName().equals("get_me")
+                    ? "{\"login\":\"octo\"}" : "[{\"number\":9,\"title\":\"GitHub issue\"}]";
+            return r.toolName().equals("get_viewer")
+                    ? "{\"id\":\"linear-user-7\",\"name\":\"Ana\"}"
+                    : "[{\"id\":\"linear-42\",\"title\":\"Linear task\",\"assignee\":{\"id\":\"linear-user-7\"}}]";
+        }).orElseThrow();
+
+        assertThat(calls).extracting(ToolExecutionRequest::serverId).containsOnly(LINEAR);
+        assertThat(calls).extracting(ToolExecutionRequest::toolName).containsExactly("get_viewer", "list_issues");
+        assertThat(calls.get(1).arguments()).containsEntry("assigneeId", "linear-user-7");
+        assertThat(result.answer().answer()).contains("Linear task").doesNotContain("GitHub issue");
+    }
+
+    @Test
+    void linearAssignedToMeUsesTheDocumentedSelfAliasWithoutAnIdentityLookup() {
+        McpToolCandidate listIssues = tool(LINEAR, "list_issues",
+                "List issues in the user's Linear workspace. For issues assigned to me, use \"me\" as the assignee.",
+                schema(Map.of("assignee", Map.of("type", List.of("string", "null"),
+                                "description", "User ID, name, email, or \"me\""),
+                        "limit", Map.of("type", "number"))), "Linear - Main");
+
+        var result = ask("Which tasks are assigned to me on Linear?", List.of(listIssues), request -> {
+            assertThat(request.toolName()).isEqualTo("list_issues");
+            assertThat(request.arguments()).containsEntry("assignee", "me");
+            return "[]";
+        }).orElseThrow();
+
+        assertThat(calls).hasSize(1);
+        assertThat(calls.getFirst().toolName()).isEqualTo("list_issues");
+        assertThat(calls.getFirst().arguments()).containsEntry("assignee", "me");
+        assertThat(result.answer().answer()).contains("No issues found");
+    }
+
+    @Test
+    void namedDisconnectedProviderDoesNotFallBackToAnotherProvider() {
+        UUID github = UUID.fromString("00000000-0000-0000-0000-0000000000c4");
+        List<McpToolCandidate> tools = List.of(
+                tool(github, "get_me", "Get the authenticated GitHub user.", schema(Map.of()), "GitHub"),
+                tool(github, "list_issues", "List GitHub issues assigned to a user.", schema(Map.of(
+                        "assignee", Map.of("type", "string"))), "GitHub"));
+
+        assertThat(ask("Which tasks are assigned to me on Linear?", tools,
+                r -> "[{\"number\":9,\"title\":\"GitHub issue\"}]")).isEmpty();
+        assertThat(calls).isEmpty();
     }
 
     @Test

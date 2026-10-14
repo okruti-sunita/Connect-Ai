@@ -121,7 +121,12 @@ public class McpConnectionService {
 
             // Replaces (and closes) any previous session for this server.
             clientRegistry.register(serverId, client);
-            if (discovery != null) discovery.discover(serverId);
+            if (discovery != null) {
+                var discovered = discovery.discover(serverId);
+                if (discovered == null || discovered.tools() == null || discovered.tools().isEmpty()) {
+                    throw new NoMcpToolsDiscoveredException();
+                }
+            }
 
             server.markConnected();
             repository.save(server);
@@ -148,9 +153,9 @@ public class McpConnectionService {
                     null);
 
         } catch (Exception exception) {
-            closeQuietly(client);
             // A failed reconnect must not leave an older session looking usable.
-            clientRegistry.remove(serverId).ifPresent(McpConnectionService::closeQuietly);
+            McpSyncClient activeClient = clientRegistry.remove(serverId).orElse(null);
+            closeQuietly(activeClient == null ? client : activeClient);
 
             String error = describeFailure(exception);
             if (server.getStatus() != McpConnectionStatus.REAUTH_REQUIRED) {
@@ -279,6 +284,9 @@ public class McpConnectionService {
         Throwable root = exception;
         for (Throwable t = exception; t != null; t = t.getCause()) {
             root = t;
+            if (t instanceof NoMcpToolsDiscoveredException) {
+                return NoMcpToolsDiscoveredException.MESSAGE;
+            }
             if (t instanceof UnknownHostException) {
                 return "Unknown host " + t.getMessage() + ". Check the endpoint URL.";
             }

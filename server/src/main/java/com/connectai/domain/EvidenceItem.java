@@ -1,5 +1,6 @@
 package com.connectai.domain;
 
+import com.connectai.agent.EvidenceCompleteness;
 import com.connectai.jpa.base.AbstractUUIDPersistable;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -50,6 +51,10 @@ public class EvidenceItem extends AbstractUUIDPersistable {
     @Column(name = "server_id")
     private UUID serverId;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private EvidenceCompleteness completeness = EvidenceCompleteness.UNKNOWN;
+
     protected EvidenceItem() {
         // required by JPA
     }
@@ -73,12 +78,19 @@ public class EvidenceItem extends AbstractUUIDPersistable {
             String summary,
             int stepNumber,
             String toolName,
-            UUID serverId
+            UUID serverId,
+            EvidenceCompleteness completeness
     ) {
         this(sourceType, sourceRef, summary, null);
         this.stepNumber = stepNumber;
         this.toolName = toolName;
         this.serverId = serverId;
+        this.completeness = completeness == null ? EvidenceCompleteness.UNKNOWN : completeness;
+    }
+
+    public EvidenceItem(SourceType sourceType, String sourceRef, String summary,
+                        int stepNumber, String toolName, UUID serverId) {
+        this(sourceType, sourceRef, summary, stepNumber, toolName, serverId, EvidenceCompleteness.UNKNOWN);
     }
 
     void setInvestigation(Investigation investigation) {

@@ -10,6 +10,7 @@ import com.connectai.agent.GroundedAnswerContext;
 import com.connectai.agent.GroundedAnswerContextBuilder;
 import com.connectai.agent.GroundedEvidence;
 import com.connectai.agent.McpToolCandidate;
+import com.connectai.agent.ProviderConstraint;
 import com.connectai.agent.PlannedToolExecutor;
 import com.connectai.agent.ToolExecutionContent;
 import com.connectai.agent.ToolSelectionPlan;
@@ -74,6 +75,11 @@ public class FastPathEngine {
         if (tools == null || tools.isEmpty()) {
             return new Decision(Optional.empty(), "No connected tools, so there is nothing to run.");
         }
+        ProviderConstraint.Scope providerScope = ProviderConstraint.apply(question, tools);
+        List<McpToolCandidate> routedTools = providerScope.constrained() ? providerScope.tools() : tools;
+        if (providerScope.constrained()) {
+            log.info("Fast path provider constraint applied: providerKeys={}", providerScope.providerKeys());
+        }
         String judgement = IntentParser.reasoningWord(question);
         if (judgement != null) {
             return new Decision(Optional.empty(), "The question needs judgement (\"" + judgement
@@ -81,10 +87,10 @@ public class FastPathEngine {
         }
         // 1. Recipes for well-known tool conventions (e.g. GitHub search qualifiers).
         Optional<ParsedQuestion> parsed = IntentParser.parse(question);
-        Optional<List<Call>> recipe = parsed.flatMap(intent -> recipe(intent, tools));
+        Optional<List<Call>> recipe = parsed.flatMap(intent -> recipe(intent, routedTools));
         if (recipe.isEmpty()) {
             // 2. Generic: match any MCP server's tools by name and schema.
-            Decision generic = runGeneric(question, tools, listener, fallback);
+            Decision generic = runGeneric(question, routedTools, listener, fallback);
             if (generic.result().isEmpty() && parsed.isPresent()) {
                 return new Decision(Optional.empty(), "Recognised " + parsed.get().intent()
                         + " but the connected tools cannot serve its recipe; " + lowerFirst(generic.explanation()));

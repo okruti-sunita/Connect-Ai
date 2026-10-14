@@ -88,7 +88,8 @@ $line: #e5e7eb;
     .wizard-main {
       padding-top: 18px;
       border-right: 0;
-      max-height: 68vh;
+      max-height: none;
+      overflow: visible;
     }
   }
 
@@ -117,6 +118,10 @@ $line: #e5e7eb;
 
     &.complete {
       border-color: #bbf7d0;
+    }
+
+    &.failed {
+      border-color: #fecaca;
     }
 
     p {
@@ -183,6 +188,11 @@ $line: #e5e7eb;
       background: #dbeafe;
       color: #1d4ed8;
     }
+
+    &.approved {
+      background: #f0fdf4;
+      color: #15803d;
+    }
   }
 
   .oauth-spinner {
@@ -206,6 +216,11 @@ $line: #e5e7eb;
     &.ready {
       background: #dcfce7;
       color: #15803d;
+    }
+
+    &.failed {
+      background: #fee2e2;
+      color: #b91c1c;
     }
   }
 
@@ -251,6 +266,13 @@ $line: #e5e7eb;
       color: $muted;
       cursor: not-allowed;
     }
+  }
+
+  .oauth-authorization-link {
+    color: #1d4ed8;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 3px;
   }
 
   .oauth-admin-setup {
@@ -440,7 +462,8 @@ $line: #e5e7eb;
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .test-list .active .test-icon {
+    .test-list .active .test-icon,
+    .oauth-spinner {
       animation: none;
     }
   }

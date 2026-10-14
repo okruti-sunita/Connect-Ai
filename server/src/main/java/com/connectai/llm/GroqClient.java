@@ -14,6 +14,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.Objects;
 
 public final class GroqClient implements LlmClient {
@@ -150,15 +154,10 @@ public final class GroqClient implements LlmClient {
 
             if (response.statusCode() < 200
                     || response.statusCode() >= 300) {
-                String message = response.body() == null
-                        ? "" : response.body().replaceAll("\\s+", " ");
-
-                if (message.length() > 400) {
-                    message = message.substring(0, 400);
-                }
-
-                throw new LlmException("Groq HTTP "
-                        + response.statusCode() + ": " + message);
+                Long retryAfter = response.headers().firstValue("Retry-After")
+                        .flatMap(GroqClient::parseRetryAfterSeconds)
+                        .orElse(null);
+                throw new LlmProviderException(response.statusCode(), retryAfter);
             }
 
             JsonNode parsed = mapper.readTree(response.body());
@@ -181,6 +180,23 @@ public final class GroqClient implements LlmClient {
             throw new LlmException(
                     "Could not communicate with Groq: "
                             + e.getClass().getSimpleName(), e);
+        }
+    }
+
+    private static java.util.Optional<Long> parseRetryAfterSeconds(String value) {
+        if (value == null || value.isBlank()) return java.util.Optional.empty();
+        String trimmed = value.trim();
+        try {
+            if (trimmed.matches("\\d+")) return java.util.Optional.of(Long.parseLong(trimmed));
+        } catch (NumberFormatException ignored) {
+            return java.util.Optional.empty();
+        }
+        try {
+            long seconds = Duration.between(Instant.now(), ZonedDateTime.parse(
+                    trimmed, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant()).getSeconds();
+            return java.util.Optional.of(Math.max(0, seconds));
+        } catch (DateTimeParseException ignored) {
+            return java.util.Optional.empty();
         }
     }
 }

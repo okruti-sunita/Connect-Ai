@@ -1,5 +1,6 @@
 package com.connectai.api.dto;
 
+import com.connectai.agent.EvidenceCompleteness;
 import com.connectai.domain.EvidenceItem;
 import com.connectai.domain.SourceType;
 
@@ -22,6 +23,7 @@ public record EvidenceResponse(
         Integer stepNumber,
         String toolName,
         UUID serverId,
+        EvidenceCompleteness completeness,
         /** Connection label; null for demo evidence or when the connection was removed since. */
         String serverName
 ) {
@@ -33,7 +35,7 @@ public record EvidenceResponse(
         return new EvidenceResponse(
                 e.getId(), e.getSourceType(), e.getSourceRef(),
                 e.getSummary(), e.getConfidenceScore(), e.getFetchedAt(),
-                e.getStepNumber(), e.getToolName(), e.getServerId(),
+                e.getStepNumber(), e.getToolName(), e.getServerId(), e.getCompleteness(),
                 e.getServerId() == null ? null : serverNames.get(e.getServerId()));
     }
 }

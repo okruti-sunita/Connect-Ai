@@ -89,6 +89,12 @@ public class ControlledAgentExecutor {
         AgentExecutionListener progress = listener == null ? AgentExecutionListener.NONE : listener;
         AgentExecutionState state = AgentExecutionState.initial(question);
 
+        ProviderConstraint.Scope providerScope = ProviderConstraint.apply(question, availableTools);
+        if (providerScope.constrained()) {
+            availableTools = providerScope.tools();
+            log.info("Agent provider constraint applied: providerKeys={}", providerScope.providerKeys());
+        }
+
         if (availableTools == null || availableTools.isEmpty()) {
             log.warn("Agent run has no connected MCP tools; nothing can be executed");
             return state.finish(AgentExecutionStatus.FAILED,
@@ -98,6 +104,7 @@ public class ControlledAgentExecutor {
         long startedAt = System.nanoTime();
         Set<String> executedCalls = new HashSet<>();
         int consecutiveFailures = 0;
+        ToolSelectionPlan paginationPlan = null;
 
         for (int stepNumber = 1; stepNumber <= maxSteps; stepNumber++) {
 
@@ -109,11 +116,17 @@ public class ControlledAgentExecutor {
 
             PlannerDecision decision;
             try {
-                decision = planner.decide(question, availableTools, state);
+                decision = paginationPlan == null
+                        ? planner.decide(question, availableTools, state)
+                        : PlannerDecision.run(paginationPlan);
+                paginationPlan = null;
+            } catch (PlannerFailureException failure) {
+                log.warn("Planner stopped at step {} with category={}", stepNumber, failure.category());
+                return state.finish(AgentExecutionStatus.FAILED, failure.getMessage(), failure.category());
             } catch (RuntimeException exception) {
                 log.warn("Planner failed at step {}: {}", stepNumber, SafeDiagnostic.message(exception, 500));
                 return state.finish(AgentExecutionStatus.FAILED,
-                        "Planner error: " + safeMessage(exception));
+                        "The investigation planner failed before completion.", AgentFailureCategory.PLANNER_FAILURE);
             }
 
             if (decision == null || decision.isFinish()) {
@@ -122,7 +135,47 @@ public class ControlledAgentExecutor {
                 return state.finish(AgentExecutionStatus.COMPLETED, reason);
             }
 
-            ToolSelectionPlan plan = decision.plan();
+            ToolSelectionPlan proposedPlan = decision.plan();
+            McpToolCandidate selectedTool = availableTools.stream()
+                    .filter(tool -> tool.serverId().equals(proposedPlan.serverId())
+                            && tool.toolName().equals(proposedPlan.toolName()))
+                    .findFirst()
+                    .orElse(null);
+            if (selectedTool == null) {
+                log.warn("Planner selected a tool outside the live catalog at step {}: serverId={}, tool={}",
+                        stepNumber, proposedPlan.serverId(), proposedPlan.toolName());
+                return state.finish(AgentExecutionStatus.FAILED,
+                        "Planner selected a tool that is not available on a healthy connected server. No tool was executed.");
+            }
+
+            ToolArgumentValidator.Result validation = ToolArgumentValidator.validate(
+                    selectedTool.inputSchema(), proposedPlan.arguments());
+            if (!validation.valid()) {
+                String validationErrors = String.join("; ", validation.errors());
+                ToolExecutionResult rejectedResult = new ToolExecutionResult(
+                        proposedPlan.toolName(), true,
+                        List.of(new ToolExecutionContent("text", "Arguments rejected before tool execution: "
+                                + validationErrors)), null);
+                AgentExecutionStep rejectedStep = new AgentExecutionStep(
+                        stepNumber, proposedPlan, rejectedResult, AgentStepStatus.FAILED,
+                        "Plan rejected before external execution: " + validationErrors, 0);
+                log.warn("Tool plan rejected before external execution: step={}, serverId={}, tool={}, errors={}",
+                        stepNumber, proposedPlan.serverId(), proposedPlan.toolName(), validationErrors);
+                state = state.addStep(rejectedStep);
+                notify(progress, rejectedStep);
+                consecutiveFailures++;
+                if (consecutiveFailures >= maxConsecutiveFailures) {
+                    return state.finish(AgentExecutionStatus.FAILED,
+                            "Tool plan for " + proposedPlan.toolName() + " was rejected: " + validationErrors);
+                }
+                continue;
+            }
+            ToolSelectionPlan plan = proposedPlan;
+            if (!validation.adjustments().isEmpty()) {
+                plan = new ToolSelectionPlan(plan.serverId(), plan.toolName(),
+                        validation.arguments(), plan.reason());
+            }
+
             String callKey = ToolCallKey.of(plan);
             if (!executedCalls.add(callKey)) {
                 log.info("Planner repeated an identical call at step {} (tool={}); stopping", stepNumber, plan.toolName());
@@ -145,6 +198,7 @@ public class ControlledAgentExecutor {
             notify(progress, step);
 
             if (step.status() == AgentStepStatus.FAILED) {
+                paginationPlan = null;
                 consecutiveFailures++;
                 if (consecutiveFailures >= maxConsecutiveFailures) {
                     return state.finish(AgentExecutionStatus.FAILED,
@@ -153,6 +207,7 @@ public class ControlledAgentExecutor {
                 }
             } else {
                 consecutiveFailures = 0;
+                paginationPlan = PaginationContinuation.next(step, selectedTool).orElse(null);
             }
         }
 
@@ -166,9 +221,5 @@ public class ControlledAgentExecutor {
         } catch (RuntimeException exception) {
             log.warn("Execution listener failed for step {}: {}", step.stepNumber(), SafeDiagnostic.message(exception, 500));
         }
-    }
-
-    private static String safeMessage(RuntimeException exception) {
-        return SafeDiagnostic.message(exception, 500);
     }
 }
